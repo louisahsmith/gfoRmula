@@ -207,8 +207,15 @@ simulate <- function(o, fitcov, fitY, fitD,
       intfunc(newdf, pool = pool, intervention, intvar, unlist(int_time), time_name, t)
       # if the intervention resulted in new columns, add placeholders
       newcols <- names(newdf)[!names(newdf) %in% names(pool)]
-      pool[,(newcols) := NA]
+      if (length(newcols) > 0) {
+          newcol_types <- sapply(newdf[,..newcols], class)
+          for (nc in seq_along(newcols)) {
+            cast <- get(paste0("as.", newcol_types[nc]))
+            set(pool, j = newcols[nc], value = cast(NA))
+          }
+      }
       pool[pool[[time_name]] == t] <- newdf
+
       # Update datatable with new covariates that are functions of history of existing
       # covariates
       make_histories(pool = pool, histvars = histvars, histvals = histvals,
