@@ -205,6 +205,9 @@ simulate <- function(o, fitcov, fitY, fitD,
       # Update datatable with specified treatment regime / intervention for this
       # simulation
       intfunc(newdf, pool = pool, intervention, intvar, unlist(int_time), time_name, t)
+      # if the intervention resulted in new columns, add placeholders
+      newcols <- names(newdf)[!names(newdf) %in% names(pool)]
+      pool[,(newcols) := NA]
       pool[pool[[time_name]] == t] <- newdf
       # Update datatable with new covariates that are functions of history of existing
       # covariates
