@@ -322,7 +322,7 @@ trim_glm <- function(fit) {
   fit$family$aic <- c()
   fit$family$validmu <- c()
   fit$family$simulate <- c()
-  attr(fit$terms,".Environment") <- c()
+  #attr(fit$terms,".Environment") <- c()
   attr(fit$formula,".Environment") <- c()
 
   return(fit)
