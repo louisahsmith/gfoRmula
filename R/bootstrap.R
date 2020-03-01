@@ -192,7 +192,7 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
              subseed = bootseeds[r], time_points = time_points,
              obs_data = resample_data, parallel = FALSE, max_visits = max_visits,
              baselags = baselags, below_zero_indicator = below_zero_indicator,
-             min_time = min_time, show_progress = show_progress, pb = pb)
+             min_time = min_time, show_progress = show_progress, pb = pb, ...)
   })
 
   nat_pool <- pools[[1]] # Simulated data under natural course
