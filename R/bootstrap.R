@@ -120,7 +120,7 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
                              time_name, outcome_name, compevent_name,
                              ranges, yrange, compevent_range, parallel, ncores, max_visits,
                              hazardratio, intcomp, boot_diag, nsimul, baselags,
-                             below_zero_indicator, min_time, show_progress, pb){
+                             below_zero_indicator, min_time, show_progress, pb, ...){
 
   set.seed(bootseeds[r])
 
