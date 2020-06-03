@@ -302,6 +302,12 @@ gformula <- function(obs_data, id, time_points = NULL,
                      nsamples = 0, parallel = FALSE, ncores = NA,
                      ci_method = 'percentile', threads, model_fits = FALSE,
                      boot_diag = FALSE, show_progress = TRUE, ...){
+
+  if( time_name == "t") {
+    obs_data$t0 <- obs_data$t
+    time_name <- "t0"
+    obs_data$t <- NULL
+  }
   if (! outcome_type %in% c('survival', 'continuous_eof', 'binary_eof')){
     stop("outcome_type must be 'survival', 'continuous_eof', or 'binary_eof', but outcome_type was set to", outcome_type)
   }
