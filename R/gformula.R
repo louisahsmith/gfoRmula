@@ -375,6 +375,7 @@ gformula <- function(obs_data, id, time_points = NULL,
                      boot_diag = FALSE, show_progress = TRUE, ipw_cutoff_quantile = NULL,
                      ipw_cutoff_value = NULL, int_visit_type = NULL,
                      sim_trunc = TRUE, ...){
+  
   if (! outcome_type %in% c('survival', 'continuous_eof', 'binary_eof')){
     stop("outcome_type must be 'survival', 'continuous_eof', or 'binary_eof', but outcome_type was set to", outcome_type)
   }
