@@ -4,11 +4,40 @@
 \alias{error_catch}
 \title{General Error Catching}
 \usage{
-error_catch(id, nsimul, intvars, interventions, int_times, int_descript,
-  covnames, covtypes, basecovs, histvars, histories, compevent_model,
-  hazardratio, intcomp, time_points, outcome_type, time_name, obs_data,
-  parallel, ncores, nsamples, sim_data_b, outcome_name, compevent_name,
-  comprisk, covmodels, histvals, min_time)
+error_catch(
+  id,
+  nsimul,
+  intvars,
+  interventions,
+  int_times,
+  int_descript,
+  covnames,
+  covtypes,
+  basecovs,
+  histvars,
+  histories,
+  compevent_model,
+  hazardratio,
+  intcomp,
+  time_points,
+  outcome_type,
+  time_name,
+  obs_data,
+  parallel,
+  ncores,
+  nsamples,
+  sim_data_b,
+  outcome_name,
+  compevent_name,
+  comprisk,
+  censor,
+  censor_name,
+  covmodels,
+  histvals,
+  ipw_cutoff_quantile,
+  ipw_cutoff_value,
+  old_convention
+)
 }
 \arguments{
 \item{id}{Character string specifying the name of the ID variable in \code{obs_data}.}
@@ -71,11 +100,21 @@ simulation.}
 
 \item{comprisk}{Logical scalar indicating the presence of a competing event.}
 
+\item{censor}{Logical scalar indicating the presence of a censoring variable in \code{obs_data}.}
+
+\item{censor_name}{Character string specifying the name of the censoring variable in \code{obs_data}.}
+
 \item{covmodels}{Vector of model statements for the time-varying covariates.}
 
 \item{histvals}{List of length 3. First element contains a vector of integers specifying the number of lags back for the lagged function. Second element contains
 a vector of integers indicating the number of lags back for the lagavg function. The last element is an indicator whether a cumavg term
 appears in any of the model statements.}
+
+\item{ipw_cutoff_quantile}{Percentile by which to truncate inverse probability weights.}
+
+\item{ipw_cutoff_value}{Cutoff value by which to truncate inverse probability weights.}
+
+\item{old_convention}{Logical scalar indicating whether the "old" intervention convention was used (i.e., by specifying \code{interventions}, \code{intvars}, and \code{int_times}).}
 }
 \value{
 No value is returned.

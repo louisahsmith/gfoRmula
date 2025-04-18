@@ -4,14 +4,53 @@
 \alias{bootstrap_helper}
 \title{Bootstrap Observed Data and Simulate Under All Interventions}
 \usage{
-bootstrap_helper(r, time_points, obs_data, bootseeds, outcome_type,
-  intvars, interventions, int_times, ref_int, covparams, covnames,
-  covtypes, covfits_custom, covpredict_custom, basecovs, histvars,
-  histvals, histories, ymodel, yrestrictions, compevent_restrictions,
-  restrictions, comprisk, compevent_model, time_name, outcome_name,
-  compevent_name, ranges, yrange, compevent_range, parallel, ncores,
-  max_visits, hazardratio, intcomp, boot_diag, nsimul, baselags,
-  below_zero_indicator, min_time, show_progress, pb)
+bootstrap_helper(
+  r,
+  time_points,
+  obs_data,
+  bootseeds,
+  outcome_type,
+  intvars,
+  interventions,
+  int_times,
+  ref_int,
+  covparams,
+  covnames,
+  covtypes,
+  covfits_custom,
+  covpredict_custom,
+  basecovs,
+  histvars,
+  histvals,
+  histories,
+  ymodel,
+  ymodel_fit_custom,
+  ymodel_predict_custom,
+  yrestrictions,
+  compevent_restrictions,
+  restrictions,
+  comprisk,
+  compevent_model,
+  time_name,
+  outcome_name,
+  compevent_name,
+  ranges,
+  parallel,
+  ncores,
+  max_visits,
+  hazardratio,
+  intcomp,
+  boot_diag,
+  nsimul,
+  baselags,
+  below_zero_indicator,
+  min_time,
+  show_progress,
+  pb,
+  int_visit_type,
+  sim_trunc,
+  ...
+)
 }
 \arguments{
 \item{r}{Integer specifying the index of the current iteration of the bootstrap.}
@@ -76,6 +115,10 @@ in \code{histories} is to be applied.}
 
 \item{ymodel}{Model statement for the outcome variable.}
 
+\item{ymodel_fit_custom}{Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details.}
+
+\item{ymodel_predict_custom}{Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details.}
+
 \item{yrestrictions}{List of vectors. Each vector containins as its first entry
 a condition and its second entry an integer. When the
 condition is \code{TRUE}, the outcome variable is simulated
@@ -110,12 +153,6 @@ third entry. The default is \code{NA}.}
 
 \item{ranges}{List of vectors. Each vector contains the minimum and
 maximum values of one of the covariates in \code{covnames}.}
-
-\item{yrange}{Vector containing the minimum and maximum values of the
-outcome variable in the observed dataset.}
-
-\item{compevent_range}{Vector containing the minimum and maximum values of the
-competing event variable in the observed dataset.}
 
 \item{parallel}{Logical scalar indicating whether to parallelize simulations of
 different interventions to multiple cores.}
@@ -153,6 +190,14 @@ are set to their values at time 0. The default is \code{FALSE}.}
 \item{show_progress}{Logical scalar indicating whether to print a progress bar for the number of bootstrap samples completed in the R console. This argument is only applicable when \code{parallel} is set to \code{FALSE} and bootstrap samples are used (i.e., \code{nsamples} is set to a value greater than 0). The default is \code{TRUE}.}
 
 \item{pb}{Progress bar R6 object. See \code{\link[progress]{progress_bar}} for further details.}
+
+\item{int_visit_type}{Vector of logicals. The kth element is a logical specifying whether to carry forward the intervened value (rather than the natural value) of the treatment variables(s) when performing a carry forward restriction type for the kth intervention in \code{interventions}.
+When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
+By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.}
+
+\item{sim_trunc}{Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}.}
+
+\item{...}{Other arguments}
 }
 \value{
 A list with the following components:

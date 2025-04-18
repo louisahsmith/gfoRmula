@@ -8,21 +8,47 @@
 \alias{print.summary.gformula}
 \title{Print and summary methods for "gformula" objects}
 \usage{
-\method{print}{gformula_survival}(x, all_times = FALSE,
-  coefficients = FALSE, stderrs = FALSE, rmses = FALSE,
-  hazardratio = FALSE, fits = FALSE, ...)
+\method{print}{gformula_survival}(
+  x,
+  all_times = FALSE,
+  coefficients = FALSE,
+  stderrs = FALSE,
+  rmses = FALSE,
+  hazardratio = FALSE,
+  fits = FALSE,
+  ...
+)
 
-\method{print}{gformula_continuous_eof}(x, coefficients = FALSE,
-  stderrs = FALSE, rmses = FALSE, fits = FALSE, ...)
+\method{print}{gformula_continuous_eof}(
+  x,
+  coefficients = FALSE,
+  stderrs = FALSE,
+  rmses = FALSE,
+  fits = FALSE,
+  ...
+)
 
-\method{print}{gformula_binary_eof}(x, coefficients = FALSE,
-  stderrs = FALSE, rmses = FALSE, fits = FALSE, ...)
+\method{print}{gformula_binary_eof}(
+  x,
+  coefficients = FALSE,
+  stderrs = FALSE,
+  rmses = FALSE,
+  fits = FALSE,
+  ...
+)
 
 \method{summary}{gformula}(object, ...)
 
-\method{print}{summary.gformula}(x, all_times = TRUE,
-  coefficients = FALSE, stderrs = FALSE, rmses = FALSE,
-  hazardratio = FALSE, fits = TRUE, ...)
+\method{print}{summary.gformula}(
+  x,
+  all_times = TRUE,
+  coefficients = FALSE,
+  stderrs = FALSE,
+  rmses = FALSE,
+  hazardratio = FALSE,
+  fits = TRUE,
+  ...
+)
 }
 \arguments{
 \item{x}{Object of class "gformula_survival", "gformula_continuous_eof", "gformula_binary_eof", or "summary.gformula" (for \code{print}).}
@@ -69,9 +95,8 @@ covparams <- list(covmodels = c(L1 ~ lag1_A + lag_cumavg1_L1 + lag_cumavg1_L2 +
                                 A ~ lag1_A + L1 + L2 + lag_cumavg1_L1 +
                                   lag_cumavg1_L2 + L3 + t0))
 ymodel <- Y ~ A + L1 + L2 + L3 + lag1_A + lag1_L1 + lag1_L2 + t0
-intvars <- list('A', 'A')
-interventions <- list(list(c(static, rep(0, time_points))),
-                      list(c(static, rep(1, time_points))))
+intervention1.A <- list(static, rep(0, time_points))
+intervention2.A <- list(static, rep(1, time_points))
 int_descript <- c('Never treat', 'Always treat')
 nsimul <- 10000
 
@@ -81,8 +106,8 @@ gform_basic <- gformula(obs_data = basicdata_nocomp, id = id,
                         outcome_name = outcome_name,
                         outcome_type = outcome_type, covtypes = covtypes,
                         covparams = covparams, ymodel = ymodel,
-                        intvars = intvars,
-                        interventions = interventions,
+                        intervention1.A = intervention1.A,
+                        intervention2.A = intervention2.A,
                         int_descript = int_descript,
                         histories = histories, histvars = histvars,
                         basecovs = c('L3'), nsimul = nsimul,

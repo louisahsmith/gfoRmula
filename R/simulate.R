@@ -42,7 +42,7 @@ predict_normal <- function(x, mean, est_sd = NA){
 #' @keywords internal
 #'
 predict_trunc_normal <- function(x, mean, est_sd, a, b){
-  return (truncnorm::rtruncnorm(x = x, mean = mean, sd = est_sd, a = a, b = b))
+  return (truncnorm::rtruncnorm(n = x, mean = mean, sd = est_sd, a = a, b = b))
 }
 
 #' Simulate Counterfactual Outcomes Under Intervention
@@ -55,6 +55,7 @@ predict_trunc_normal <- function(x, mean, est_sd, a, b){
 #' @param fitcov                  List of model fits for the time-varying covariates.
 #' @param fitY                    Model fit for the outcome variable.
 #' @param fitD                    Model fit for the competing event variable, if any.
+#' @param ymodel_predict_custom   Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details.
 #' @param yrestrictions           List of vectors. Each vector containins as its first entry
 #'                                a condition and its second entry an integer. When the
 #'                                condition is \code{TRUE}, the outcome variable is simulated
@@ -92,10 +93,6 @@ predict_trunc_normal <- function(x, mean, est_sd, a, b){
 #' @param comprisk                Logical scalar indicating the presence of a competing event.
 #' @param ranges                  List of vectors. Each vector contains the minimum and
 #'                                maximum values of one of the covariates in \code{covnames}.
-#' @param yrange                  Vector containing the minimum and maximum values of the
-#'                                outcome variable in the observed dataset.
-#' @param compevent_range         Vector containing the minimum and maximum values of the
-#'                                competing event variable in the observed dataset.
 #' @param outcome_type            Character string specifying the "type" of the outcome. The possible "types" are: \code{"survival"}, \code{"continuous_eof"}, and \code{"binary_eof"}.
 #' @param subseed                 Integer specifying the seed for this simulation.
 #' @param obs_data                Data table containing the observed data.
@@ -131,19 +128,24 @@ predict_trunc_normal <- function(x, mean, est_sd, a, b){
 #' @param min_time                Numeric scalar specifying lowest value of time \eqn{t} in the observed data set.
 #' @param show_progress           Logical scalar indicating whether to print a progress bar for the number of bootstrap samples completed in the R console. This argument is only applicable when \code{parallel} is set to \code{FALSE} and bootstrap samples are used (i.e., \code{nsamples} is set to a value greater than 0). The default is \code{TRUE}.
 #' @param pb                      Progress bar R6 object. See \code{\link[progress]{progress_bar}} for further details.
+#' @param int_visit_type          Vector of logicals. The kth element is a logical specifying whether to carry forward the intervened value (rather than the natural value) of the treatment variables(s) when performing a carry forward restriction type for the kth intervention in \code{interventions}.
+#'                                When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
+#'                                By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.
+#' @param sim_trunc               Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}.
 #' @param ...                     Other arguments, which are passed to the functions in \code{covpredict_custom}.
 #' @return                        A data table containing simulated data under the specified intervention.
 #' @keywords internal
 #' @import data.table
-simulate <- function(o, fitcov, fitY, fitD,
+simulate <- function(o, fitcov, fitY, fitD, ymodel_predict_custom,
                      yrestrictions, compevent_restrictions, restrictions,
                      outcome_name, compevent_name, time_name,
                      intvars, interventions, int_times, histvars, histvals, histories,
-                     comprisk, ranges, yrange, compevent_range,
+                     comprisk, ranges,
                      outcome_type, subseed, obs_data, time_points, parallel,
                      covnames, covtypes, covparams, covpredict_custom,
                      basecovs, max_visits, baselags, below_zero_indicator,
-                     min_time, show_progress, pb, ...){
+                     min_time, show_progress, pb, int_visit_type, sim_trunc,
+                     ...){
   set.seed(subseed)
 
   # Mechanism of passing intervention variable and intervention is different for parallel
@@ -152,6 +154,7 @@ simulate <- function(o, fitcov, fitY, fitD,
     intvar <- intvars[[o]]
     intervention <- interventions[[o]]
     int_time <- int_times[[o]]
+    int_visit_type <- int_visit_type[o]
   } else {
     intvar <- intvars
     intervention <- interventions
@@ -160,9 +163,7 @@ simulate <- function(o, fitcov, fitY, fitD,
 
   if (!is.null(fitcov)){
     rmses <- lapply(seq_along(fitcov), FUN = rmse_calculate, fits = fitcov, covnames = covnames,
-                    covtypes = covtypes, obs_data = obs_data, outcome_name = outcome_name,
-                    time_name = time_name, restrictions = restrictions,
-                    yrestrictions = yrestrictions, compevent_restrictions = compevent_restrictions)
+                    covtypes = covtypes)
   }
 
   # Initialize
@@ -175,7 +176,8 @@ simulate <- function(o, fitcov, fitY, fitD,
   }
 
   # Create histories_int and histvars_int, which are the necessary histories to create after the intervention
-  if (!(length(intvar) == 1 && intvar == 'none')) {
+  nat_course <- length(intvar) == 1 && intvar == 'none'
+  if (!nat_course) {
     intvar_vec <- unique(unlist(intvar))
     histvars_int <- histories_int <- rep(list(NA), length(histvars))
     for (l in seq_along(histvars)){
@@ -198,6 +200,7 @@ simulate <- function(o, fitcov, fitY, fitD,
         pool <- obs_data[obs_data[[time_name]] <= t, ][, .SD, .SDcols = c(covnames, time_name)]
       }
       set(pool, j = 'id', value = rep(ids_unique, each = 1 - min_time))
+      set(pool, j = 'eligible_pt', value = TRUE)
       if (!is.na(basecovs[[1]])){
         setcolorder(pool, c('id', time_name, covnames, basecovs))
       } else {
@@ -206,7 +209,28 @@ simulate <- function(o, fitcov, fitY, fitD,
       newdf <- pool[pool[[time_name]] == 0]
       # Update datatable with specified treatment regime / intervention for this
       # simulation
+      if (!nat_course){
+        mycols <- match(intvar, names(newdf))
+        temp_intvar <- newdf[, ..mycols]
+
+        if (!int_visit_type){
+          for (var in intvar){
+            newdf[, eval(paste0(var, '_natural')) := newdf[[var]]]
+          }
+        }
+      }
       intfunc(newdf, pool = pool, intervention, intvar, unlist(int_time), time_name, t)
+      # Check if intervened
+      intervened <- rep(0, times = nrow(newdf))
+      if (!nat_course){
+        for (var in intvar){
+          # Check if the natural value of the intervention variable equals the intervened value
+          intervened <- intervened + (abs(temp_intvar[[var]] - newdf[[var]]) > 1e-6)
+        }
+        intervened <- ifelse(newdf$eligible_pt, intervened >= 1, NA)
+      }
+      set(newdf, j = 'intervened', value = intervened)
+
       if (ncol(newdf) > ncol(pool)){
         pool <- rbind(pool[pool[[time_name]] < t], newdf, fill = TRUE)
         pool <- pool[order(id, get(time_name))]
@@ -221,18 +245,30 @@ simulate <- function(o, fitcov, fitY, fitD,
       newdf <- pool[pool[[time_name]] == t]
       # Generate outcome probabilities
       if (outcome_type == 'survival'){
-        set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+        if (is.null(ymodel_predict_custom)){
+          set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+        } else {
+          set(newdf, j = 'Py', value = ymodel_predict_custom(fitY, newdf = newdf))
+        }
       } else if (outcome_type == 'continuous_eof'){
         if (t < (time_points - 1)){
           set(newdf, j = 'Ey', value = as.double(NA))
         } else if (t == (time_points - 1)){
-          set(newdf, j = 'Ey', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          if (is.null(ymodel_predict_custom)){
+            set(newdf, j = 'Ey', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          } else {
+            set(newdf, j = 'Ey', value = ymodel_predict_custom(fitY, newdf = newdf))
+          }
         }
       } else if (outcome_type == 'binary_eof'){
         if (t < (time_points - 1)){
           set(newdf, j = 'Py', value = as.double(NA))
         } else if (t == (time_points - 1)){
-          set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          if (is.null(ymodel_predict_custom)){
+            set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          } else {
+            set(newdf, j = 'Py', value = ymodel_predict_custom(fitY, newdf = newdf))
+          }
         }
       }
       if (!is.na(yrestrictions[[1]][[1]])){ # Check if there are restrictions on outcome
@@ -249,13 +285,6 @@ simulate <- function(o, fitcov, fitY, fitD,
       if (outcome_type == 'survival'){
         set(newdf, j = 'Y', value = stats::rbinom(data_len, 1, newdf$Py))
       }
-      # Set simulated outcome values outside the observed range to the observed min / max
-      if (length(newdf[newdf$Y < yrange[1]]$Y) != 0){
-        set(newdf[newdf$Y < yrange[1]], j = 'Y', value = yrange[1])
-      }
-      if (length(newdf[newdf$Y > yrange[2]]$Y) != 0){
-        set(newdf[newdf$Y > yrange[2]], j = 'Y', value = yrange[2])
-      }
       if (outcome_type == 'survival')
       {
         if (comprisk){
@@ -271,26 +300,18 @@ simulate <- function(o, fitcov, fitY, fitD,
           }
           # Simulate competing event variable
           set(newdf, j = 'D', value = stats::rbinom(data_len, 1, newdf$Pd))
-          # Set simulated competing event values outside the observed range to the observed
-          # min / max
-          if (length(newdf[newdf$D < compevent_range[1]]$D) != 0){
-            set(newdf[newdf$D < compevent_range[1]], j = 'D', value = compevent_range[1])
-          }
-          if (length(newdf[newdf$D > compevent_range[2]]$D) != 0){
-            set(newdf[newdf$D > compevent_range[2]], j = 'D', value = compevent_range[2])
-          }
           # Calculate probability of death by main event rather than competing event at
           # time t
           set(newdf, j = 'prodp1', value = newdf$Py * (1 - newdf$Pd))
+          set(newdf, j = 'prodd0', value = 1 - newdf$Pd)
         } else {
           set(newdf, j = 'D', value = 0)
           # Calculate probability of death by main event without competing event
-          if (outcome_type == 'survival'){
-            set(newdf, j = 'prodp1', value = newdf$Py)
-          }
+          set(newdf, j = 'prodp1', value = newdf$Py)
         }
         set(newdf[newdf$D == 1], j = 'Y', value = NA)
         set(newdf, j = 'prodp0', value = 1 - newdf$Py)
+        set(newdf, j = 'poprisk', value = newdf$prodp1)
       }
       # If competing event occurs, outcome cannot also occur because
       # both presumably lead to death
@@ -364,7 +385,7 @@ simulate <- function(o, fitcov, fitY, fitD,
                     if (condition[1] == ""){
                       condition <- conditions[j]
                     } else {
-                      condition <- paste(condition, conditions[j], sep = "||")
+                      condition <- paste(condition, conditions[j], sep = "&")
                     }
                   }
                 }
@@ -433,7 +454,7 @@ simulate <- function(o, fitcov, fitY, fitD,
                     if (condition[1] == ""){
                       condition <- conditions[j]
                     } else {
-                      condition <- paste(condition, conditions[j], sep = "||")
+                      condition <- paste(condition, conditions[j], sep = "&")
                     }
                   }
                 }
@@ -454,22 +475,24 @@ simulate <- function(o, fitcov, fitY, fitD,
               value = cast(covpredict_custom[[i]](obs_data, newdf, fitcov[[i]],time_name, t,
                                              condition, covnames[i], ...)))
         }
-        if (covtypes[i] == 'normal' || covtypes[i] == 'bounded normal' ||
-           covtypes[i] == 'truncated normal'){
+        if (sim_trunc){
+          if (covtypes[i] == 'normal' || covtypes[i] == 'bounded normal' ||
+              covtypes[i] == 'truncated normal'){
 
-             if (length(newdf[newdf[[covnames[i]]] < ranges[[i]][1]][[covnames[i]]]) != 0){
-                newdf[newdf[[covnames[i]]] < ranges[[i]][1], (covnames[i]) := cast(ranges[[i]][1])]
-             }
-             if (length(newdf[newdf[[covnames[i]]] > ranges[[i]][2]][[covnames[i]]]) != 0){
-                newdf[newdf[[covnames[i]]] > ranges[[i]][2], (covnames[i]) := cast(ranges[[i]][2])]
-             }
-        } else if (covtypes[i] == 'zero-inflated normal') {
-             if (length(newdf[newdf[[covnames[i]]] < ranges[[i]][1] & newdf[[covnames[i]]] > 0][[covnames[i]]]) != 0){
-                newdf[newdf[[covnames[i]]] < ranges[[i]][1] & newdf[[covnames[i]]] > 0, (covnames[i]) := cast(ranges[[i]][1])]
-             }
-             if (length(newdf[newdf[[covnames[i]]] > ranges[[i]][2]][[covnames[i]]]) != 0){
-                newdf[newdf[[covnames[i]]] > ranges[[i]][2], (covnames[i]) := cast(ranges[[i]][2])]
-             }
+            if (length(newdf[newdf[[covnames[i]]] < ranges[[i]][1]][[covnames[i]]]) != 0){
+              newdf[newdf[[covnames[i]]] < ranges[[i]][1], (covnames[i]) := cast(ranges[[i]][1])]
+            }
+            if (length(newdf[newdf[[covnames[i]]] > ranges[[i]][2]][[covnames[i]]]) != 0){
+              newdf[newdf[[covnames[i]]] > ranges[[i]][2], (covnames[i]) := cast(ranges[[i]][2])]
+            }
+          } else if (covtypes[i] == 'zero-inflated normal') {
+            if (length(newdf[newdf[[covnames[i]]] < ranges[[i]][1] & newdf[[covnames[i]]] > 0][[covnames[i]]]) != 0){
+              newdf[newdf[[covnames[i]]] < ranges[[i]][1] & newdf[[covnames[i]]] > 0, (covnames[i]) := cast(ranges[[i]][1])]
+            }
+            if (length(newdf[newdf[[covnames[i]]] > ranges[[i]][2]][[covnames[i]]]) != 0){
+              newdf[newdf[[covnames[i]]] > ranges[[i]][2], (covnames[i]) := cast(ranges[[i]][2])]
+            }
+          }
         }
         # Check if there are restrictions on covariate simulation
         if (!is.na(restrictions[[1]][[1]])){
@@ -477,7 +500,7 @@ simulate <- function(o, fitcov, fitY, fitD,
             if (restrictions[[r]][[1]] == covnames[i]){
               restrict_ids <- newdf[!eval(parse(text = restrictions[[r]][[2]]))]$id
               if (length(restrict_ids) != 0){
-                restrictions[[r]][[3]](newdf, pool[pool[[time_name]] < t & pool[[time_name]] >= 0], restrictions[[r]], time_name, t)
+                restrictions[[r]][[3]](newdf, pool[pool[[time_name]] < t & pool[[time_name]] >= 0], restrictions[[r]], time_name, t, int_visit_type, intvar)
               }
             }
           })
@@ -497,7 +520,28 @@ simulate <- function(o, fitcov, fitY, fitD,
       # Update datatable with specified treatment regime / intervention for this
       # simulation
       newdf <- pool[pool[[time_name]] == t]
+      if (!nat_course){
+        mycols <- match(intvar, names(newdf))
+        temp_intvar <- newdf[, ..mycols]
+
+        if (!int_visit_type){
+          for (var in intvar){
+            newdf[, eval(paste0(var, '_natural')) := newdf[[var]]]
+          }
+        }
+      }
       intfunc(newdf, pool, intervention, intvar, unlist(int_time), time_name, t)
+      # Check if intervened
+      intervened <- rep(0, times = nrow(newdf))
+      if (!nat_course){
+        for (var in intvar){
+          # Check if the natural value of the intervention variable equals the intervened value
+          intervened <- intervened + (abs(temp_intvar[[var]] - newdf[[var]]) > 1e-6)
+        }
+        intervened <- ifelse(newdf$eligible_pt, intervened >= 1, NA)
+      }
+      set(newdf, j = 'intervened', value = intervened)
+
       # Update datatable with new covariates that are functions of history of existing
       # covariates
       pool[pool[[time_name]] == t] <- newdf
@@ -525,29 +569,34 @@ simulate <- function(o, fitcov, fitY, fitD,
           }
           # Simulate competing event variable
           set(newdf, j = 'D', value = stats::rbinom(data_len, 1, newdf$Pd))
-          # Set simulated competing event values outside the observed range to the observed
-          # min / max
-          if (length(newdf[newdf$D < compevent_range[1]]$D) != 0){
-            newdf[newdf$D < compevent_range[1], "D" := compevent_range[1]]
-          }
-          if (length(newdf[newdf$D > compevent_range[2]]$D) != 0){
-            newdf[newdf$D > compevent_range[2], "D" := compevent_range[2]]
-          }
         } else {
           set(newdf, j = 'D', value = 0)
         }
-        set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+        if (is.null(ymodel_predict_custom)){
+          set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+        } else {
+          set(newdf, j = 'Py', value = ymodel_predict_custom(fitY, newdf = newdf))
+        }
       } else if (outcome_type == 'continuous_eof'){
         if (t < (time_points - 1)){
           set(newdf, j = 'Ey', value = as.double(NA))
         } else if (t == (time_points - 1)){
-          set(newdf, j = 'Ey', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          if (is.null(ymodel_predict_custom)){
+            set(newdf, j = 'Ey', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          } else {
+            set(newdf, j = 'Ey', value = ymodel_predict_custom(fitY, newdf = newdf))
+          }
         }
       } else if (outcome_type == 'binary_eof'){
         if (t < (time_points - 1)){
           set(newdf, j = 'Py', value = as.double(NA))
         } else if (t == (time_points - 1)){
-          set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          if (is.null(ymodel_predict_custom)){
+            set(newdf, j = 'Py', value = stats::predict(fitY, type = 'response', newdata = newdf))
+          } else {
+            set(newdf, j = 'Py', value = ymodel_predict_custom(fitY, newdf = newdf))
+          }
+
         }
       }
       if (!is.na(yrestrictions[[1]][[1]])){ # Check if there are restrictions on outcome
@@ -563,51 +612,30 @@ simulate <- function(o, fitcov, fitY, fitD,
           }
         }
       }
-      # Calculate probability of survival or death from competing event (if any) at time t
-      if (outcome_type == 'survival'){
-        set(newdf, j = 'prodp0', value = 1 - newdf$Py)
-      }
       # Simulate outcome variable
       if (outcome_type == 'survival'){
         set(newdf, j = 'Y', value = stats::rbinom(data_len, 1, newdf$Py))
-      }
-      # Set simulated outcome values outside the observed range to the observed min / max
-      if (length(newdf[newdf$Y < yrange[1]]$Y) != 0){
-        newdf[newdf$Y < yrange[1], 'Y' := yrange[1]]
-      }
-      if (length(newdf[newdf$Y > yrange[2]]$Y) != 0){
-        newdf[newdf$Y > yrange[2], 'Y' := yrange[2]]
-      }
-      if (outcome_type == 'survival')
         newdf[newdf$D == 1, 'Y' := NA]
-      # If competing event occurs, outcome cannot also occur because
-      # both presumably lead to death
-      # Calculate probability of death from main event at time t
-      if (comprisk){
-        set(newdf, j = 'prodp1',
-            value = newdf$Py * tapply(pool[pool[[time_name]] < t & pool[[time_name]] >= 0]$prodp0,
-                                      pool[pool[[time_name]] < t & pool[[time_name]] >= 0]$id, FUN = prod) *
-              tapply(1 - pool[pool[[time_name]] < t & pool[[time_name]] >= 0]$Pd,
-                     pool[pool[[time_name]] < t & pool[[time_name]] >= 0]$id,
-                     FUN = prod) * (1 - newdf$Pd))
-      } else if (outcome_type == 'survival'){
-        set(newdf, j = 'prodp1', value = newdf$Py * tapply(pool[pool[[time_name]] < t & pool[[time_name]] >= 0]$prodp0,
-                                                           pool[pool[[time_name]] < t & pool[[time_name]] >= 0]$id,
-                                                           FUN = prod))
+        if (comprisk){
+          set(newdf, j = 'prodp1',
+              value = newdf$Py * (1 - newdf$Pd) * pool[pool[[time_name]] == t - 1,]$prodp0 * pool[pool[[time_name]] == t - 1,]$prodd0)
+          set(newdf, j = 'prodd0', value = (1 - newdf$Pd) * pool[pool[[time_name]] == t - 1,]$prodd0)
+        } else {
+          set(newdf, j = 'prodp1',
+              value = newdf$Py * pool[pool[[time_name]] == t - 1,]$prodp0)
+        }
+        set(newdf, j = 'prodp0', value = (1 - newdf$Py) * pool[pool[[time_name]] == t - 1,]$prodp0)
+        set(newdf, j = 'poprisk', value = pool[pool[[time_name]] == t - 1,]$poprisk + newdf$prodp1)
       }
-      # Add simulated data for time t to aggregate simulated data over time
       pool[pool[[time_name]] == t] <- newdf
     }
   }
   colnames(pool)[colnames(pool) == time_name] <- 't0'
   setorder(pool, id, t0)
   colnames(pool)[colnames(pool) == 't0'] <- time_name
-  # Calculate probabiity of death from main event at or before time t for each individual
-  # at each time point
   pool <- pool[pool[[time_name]] >= 0]
   if (outcome_type == 'survival'){
-    pool[, 'poprisk' := stats::ave(pool$prodp1, by = pool$id, FUN = cumsum)]
-    pool[, 'survival' := stats::ave(pool$prodp0, by = pool$id, FUN = cumprod)]
+    pool[, 'survival' := 1 - pool$poprisk]
   }
   pool2 <- copy(pool)
   if (show_progress){

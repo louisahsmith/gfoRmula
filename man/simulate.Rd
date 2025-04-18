@@ -4,13 +4,46 @@
 \alias{simulate}
 \title{Simulate Counterfactual Outcomes Under Intervention}
 \usage{
-simulate(o, fitcov, fitY, fitD, yrestrictions, compevent_restrictions,
-  restrictions, outcome_name, compevent_name, time_name, intvars,
-  interventions, int_times, histvars, histvals, histories, comprisk,
-  ranges, yrange, compevent_range, outcome_type, subseed, obs_data,
-  time_points, parallel, covnames, covtypes, covparams, covpredict_custom,
-  basecovs, max_visits, baselags, below_zero_indicator, min_time,
-  show_progress, pb, ...)
+simulate(
+  o,
+  fitcov,
+  fitY,
+  fitD,
+  ymodel_predict_custom,
+  yrestrictions,
+  compevent_restrictions,
+  restrictions,
+  outcome_name,
+  compevent_name,
+  time_name,
+  intvars,
+  interventions,
+  int_times,
+  histvars,
+  histvals,
+  histories,
+  comprisk,
+  ranges,
+  outcome_type,
+  subseed,
+  obs_data,
+  time_points,
+  parallel,
+  covnames,
+  covtypes,
+  covparams,
+  covpredict_custom,
+  basecovs,
+  max_visits,
+  baselags,
+  below_zero_indicator,
+  min_time,
+  show_progress,
+  pb,
+  int_visit_type,
+  sim_trunc,
+  ...
+)
 }
 \arguments{
 \item{o}{Integer specifying the index of the current intervention.}
@@ -20,6 +53,8 @@ simulate(o, fitcov, fitY, fitD, yrestrictions, compevent_restrictions,
 \item{fitY}{Model fit for the outcome variable.}
 
 \item{fitD}{Model fit for the competing event variable, if any.}
+
+\item{ymodel_predict_custom}{Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details.}
 
 \item{yrestrictions}{List of vectors. Each vector containins as its first entry
 a condition and its second entry an integer. When the
@@ -72,12 +107,6 @@ in \code{histories} is to be applied.}
 \item{ranges}{List of vectors. Each vector contains the minimum and
 maximum values of one of the covariates in \code{covnames}.}
 
-\item{yrange}{Vector containing the minimum and maximum values of the
-outcome variable in the observed dataset.}
-
-\item{compevent_range}{Vector containing the minimum and maximum values of the
-competing event variable in the observed dataset.}
-
 \item{outcome_type}{Character string specifying the "type" of the outcome. The possible "types" are: \code{"survival"}, \code{"continuous_eof"}, and \code{"binary_eof"}.}
 
 \item{subseed}{Integer specifying the seed for this simulation.}
@@ -128,6 +157,12 @@ are set to their values at time 0. The default is \code{FALSE}.}
 \item{show_progress}{Logical scalar indicating whether to print a progress bar for the number of bootstrap samples completed in the R console. This argument is only applicable when \code{parallel} is set to \code{FALSE} and bootstrap samples are used (i.e., \code{nsamples} is set to a value greater than 0). The default is \code{TRUE}.}
 
 \item{pb}{Progress bar R6 object. See \code{\link[progress]{progress_bar}} for further details.}
+
+\item{int_visit_type}{Vector of logicals. The kth element is a logical specifying whether to carry forward the intervened value (rather than the natural value) of the treatment variables(s) when performing a carry forward restriction type for the kth intervention in \code{interventions}.
+When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
+By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.}
+
+\item{sim_trunc}{Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}.}
 
 \item{...}{Other arguments, which are passed to the functions in \code{covpredict_custom}.}
 }

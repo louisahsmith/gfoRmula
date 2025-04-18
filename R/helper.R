@@ -70,10 +70,15 @@ hr_helper <- function(i, intcomp, time_name, pools){
 #' @param outcome_name            Character string specifying the name of the outcome variable in \code{obs_data}.
 #' @param compevent_name          Character string specifying the name of the competing event variable in \code{obs_data}.
 #' @param comprisk                Logical scalar indicating the presence of a competing event.
+#' @param censor                 Logical scalar indicating the presence of a censoring variable in \code{obs_data}.
+#' @param censor_name            Character string specifying the name of the censoring variable in \code{obs_data}.
 #' @param covmodels              Vector of model statements for the time-varying covariates.
 #' @param histvals               List of length 3. First element contains a vector of integers specifying the number of lags back for the lagged function. Second element contains
 #'                               a vector of integers indicating the number of lags back for the lagavg function. The last element is an indicator whether a cumavg term
 #'                               appears in any of the model statements.
+#' @param ipw_cutoff_quantile    Percentile by which to truncate inverse probability weights.
+#' @param ipw_cutoff_value       Cutoff value by which to truncate inverse probability weights.
+#' @param old_convention         Logical scalar indicating whether the "old" intervention convention was used (i.e., by specifying \code{interventions}, \code{intvars}, and \code{int_times}).
 #'
 #' @return                       No value is returned.
 #' @keywords internal
@@ -84,7 +89,8 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
                         hazardratio, intcomp, time_points, outcome_type,
                         time_name, obs_data, parallel, ncores, nsamples,
                         sim_data_b, outcome_name, compevent_name, comprisk,
-                        covmodels, histvals, min_time){
+                        censor, censor_name, covmodels, histvals, ipw_cutoff_quantile,
+                        ipw_cutoff_value, old_convention){
 
   if (!is.data.table(obs_data)){
     if (is.data.frame(obs_data)){
@@ -114,6 +120,13 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
       stop(paste('compevent_name', compevent_name, 'not found in obs_data'))
     }
   }
+  if (censor){
+    if (is.null(censor_name)){
+      stop("Missing parameter censor_name")
+    } else if (!(censor_name %in% obs_colnames)){
+      stop(paste('censor_name', censor_name, 'not found in obs_data'))
+    }
+  }
   if (!missing(covnames)){
     for (covname in covnames){
       if (!(covname %in% obs_colnames)){
@@ -135,6 +148,16 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
       }
     }
   }
+  if (!is.null(intvars)){
+    for (intvar in unique(unlist(intvars))){
+      if (!(intvar %in% obs_colnames)){
+        stop(paste('Intervention variable', intvar, 'not found in obs_data'))
+      }
+      if (!(intvar %in% covnames)){
+        stop(paste('Intervention variable', intvar, 'not found in covnames'))
+      }
+    }
+  }
 
   if (!is.na(nsimul) && nsimul < length(unique(obs_data[[id]]))){
     warning("Number of simulated subjects desired is fewer than number of observed
@@ -145,6 +168,8 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
     stop("Missing parameter time_name")
   } else if (!(time_name %in% colnames(obs_data))){
     stop(paste('time_name', time_name, 'not found in obs_data'))
+  } else if (time_name == 't'){
+    stop('time_name cannot be set to "t"')
   }
   if(!is.numeric(obs_data[[time_name]])){
     stop("Time variable in obs_data is not a numeric variable")
@@ -156,7 +181,13 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
                                      all(x == min(min_time, 0):(length(x)+min(min_time, 0)-1))
                                      })
   if (!all(correct_time_indicator)){
-    stop("Time variable in obs_data not correctly specified. For each individual time records should begin with 0 (or, optionally -i if using i lags) and increase in increments of 1, where no time records are skipped.")
+    stop("Time variable in obs_data not correctly specified. For each individual time records should begin with 0 (or, optionally -i if using i lags) and increase in increments of 1 in consecutive rows, where no time records are skipped.")
+  }
+  n_temp <- nrow(obs_data)
+  dif <- obs_data[2:n_temp][[time_name]] - obs_data[1:(n_temp - 1)][[time_name]]
+  rows_changing_id <- which(dif != 1)
+  if(!(all(obs_data[rows_changing_id + 1][[time_name]] == min_time))){
+    stop('obs_data is not sorted with respect to the ID variable and time variable. For each individual time records should begin with 0 (or, optionally -i if using i lags) and increase in increments of 1 in consecutive rows, where no time records are skipped. ')
   }
 
   obs_time_points_pos <- max(obs_data[[time_name]])+1
@@ -182,6 +213,14 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
       }
     }
   }
+  all_covtypes <- c('binary', 'normal', 'categorical', 'bounded normal',
+                    'zero-inflated normal', 'truncated normal',
+                    'absorbing', 'categorical time', 'custom')
+  for (covtype in covtypes){
+    if (!(covtype %in% all_covtypes)){
+      stop(paste('covtype', covtype, 'is not one of the valid options'))
+    }
+  }
 
   if (parallel & is.na(ncores)){
     stop("Number of cores must be specified when parallel is set to TRUE")
@@ -201,17 +240,29 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
   }
   if (is.null(int_descript)){
     if (length(intvars) != length(interventions)){
-      stop("Intervention parameters (intvars, interventions) are unequal lengths")
+      if (old_convention){
+        stop("Intervention parameters (intvars, interventions) are unequal lengths")
+      } else {
+        stop("The intervention parameters are not appropriately set")
+      }
     }
   } else {
     if (!all(sapply(list(length(intvars), length(interventions)),
                     FUN = identical, length(int_descript)))){
-      stop("Intervention parameters (intvars, interventions, int_descript) are unequal lengths")
+      if (old_convention){
+        stop("Intervention parameters (intvars, interventions, int_descript) are unequal lengths")
+      } else {
+        stop("The intervention parameters are not appropriately set")
+      }
     }
   }
   if (!is.null(int_times)){
     if (length(int_times) != length(interventions)){
-      stop("Intervention parameters (int_times, interventions) are unequal lengths")
+      if (old_convention){
+        stop("Intervention parameters (int_times, interventions) are unequal lengths")
+      } else {
+        stop("The parameter int_times is not appropriately set")
+      }
     }
   }
 
@@ -298,12 +349,33 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
     stop("covmodels and covnames are unequal lengths")
   }
   for (i in seq_along(covnames)){
-    rel_model <- paste(deparse(covmodels[[i]]), collapse = "")
-    model_var <- stringr::str_extract(rel_model, '[^~]+')
-    model_var <- stringr::str_trim(model_var, 'left')
-    model_var <- stringr::str_trim(model_var, 'right')
-    if (!stringr::str_detect(covnames[i], model_var)){
-      stop("covmodels and covnames ordering do not match")
+    if (covtypes[i] != 'categorical time'){
+      rel_model <- paste(deparse(covmodels[[i]]), collapse = "")
+      model_var <- stringr::str_extract(rel_model, '[^~]+')
+      model_var <- stringr::str_trim(model_var, 'left')
+      model_var <- stringr::str_trim(model_var, 'right')
+      if (!stringr::str_detect(covnames[i], model_var)){
+        stop("covmodels and covnames ordering do not match")
+      }
+    }
+  }
+  if (!is.null(ipw_cutoff_quantile) & !is.null(ipw_cutoff_value)){
+    stop("Only one of 'ipw_cutoff_quantile' and 'ipw_cutoff_value' can be supplied")
+  }
+  if (!is.null(ipw_cutoff_quantile)){
+    if (!is.numeric(ipw_cutoff_quantile)){
+      stop("'ipw_cutoff_quantile' must be a numeric variable")
+    }
+    if (ipw_cutoff_quantile <= 0 | ipw_cutoff_quantile > 1){
+      stop("'ipw_cutoff_quantile' must be between 0 and 1")
+    }
+  }
+  if (!is.null(ipw_cutoff_value)){
+    if (!is.numeric(ipw_cutoff_value)){
+      stop("'ipw_cutoff_value' must be a numeric variable")
+    }
+    if (ipw_cutoff_value <= 0){
+      stop("'ipw_cutoff_value' must be greater than 0")
     }
   }
 }
@@ -356,7 +428,7 @@ add_rmse <- function(fit){
 
 add_stderr <- function(fit){
   if (any(class(fit) == 'multinom')){
-    return(summary(fit)$coefficients)
+    return(summary(fit)$standard.errors)
   } else {
     return (stats::coefficients(summary(fit))[, "Std. Error"])
   }
@@ -517,4 +589,37 @@ get_vcovs <- function(fits, fitD, time_points, outcome_name, compevent_name,
     }
   }
   return(vcovs)
+}
+
+get_percent_intervened <- function(pools){
+  percent_intervened <- c(0, rep(NA, times = length(pools)))
+  average_percent_intervened <- c(0, rep(NA, times = length(pools)))
+  my_any <- function(x){
+    if (all(is.na(x))){
+      # Handles the edge case of an individual not having any eligible person-time
+      return(NA)
+    } else {
+      return(any(x, na.rm = TRUE))
+    }
+  }
+  if (length(pools) > 0){
+    for (int_num in 1:length(pools)){
+      df <- pools[[int_num]]
+      average_percent_intervened[int_num + 1] <- 100 * mean(df$intervened, na.rm = TRUE)
+      percent_intervened[int_num + 1] <- 100 * mean(tapply(df$intervened, df$id, my_any), na.rm = TRUE)
+    }
+  }
+  return(list(percent_intervened = percent_intervened,
+              average_percent_intervened = average_percent_intervened))
+}
+
+# Helper function for processing new intervention specification format
+split_args <- function(argument, target_string) {
+  split_list <- stringr::str_split(names(argument), target_string)
+  origin_list <- lapply(split_list, function(x) {x[2]})
+  split_by_dot <- stringr::str_split(origin_list, "[.]")
+  prefix <- lapply(split_by_dot, function(x) {x[1]})
+  suffix <- lapply(split_by_dot, function(x) {x[2]})
+
+  return(list(prefix = prefix, suffix = suffix, origin_list = origin_list))
 }

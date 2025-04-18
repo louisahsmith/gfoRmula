@@ -4,17 +4,56 @@
 \alias{gformula_survival}
 \title{Estimation of Survival Outcome Under the Parametric G-Formula}
 \usage{
-gformula_survival(obs_data, id, time_points = NULL, time_name, covnames,
-  covtypes, covparams, covfits_custom = NA, covpredict_custom = NA,
-  histvars = NULL, histories = NA, basecovs = NA, outcome_name,
-  ymodel, compevent_name = NULL, compevent_model = NA,
-  intvars = NULL, interventions = NULL, int_times = NULL,
-  int_descript = NULL, ref_int = 0, intcomp = NA,
-  visitprocess = NA, restrictions = NA, yrestrictions = NA,
-  compevent_restrictions = NA, baselags = FALSE, nsimul = NA,
-  sim_data_b = FALSE, seed, nsamples = 0, parallel = FALSE,
-  ncores = NA, ci_method = "percentile", threads, model_fits = FALSE,
-  boot_diag = FALSE, show_progress = TRUE, ...)
+gformula_survival(
+  obs_data,
+  id,
+  time_points = NULL,
+  time_name,
+  covnames,
+  covtypes,
+  covparams,
+  covfits_custom = NA,
+  covpredict_custom = NA,
+  histvars = NULL,
+  histories = NA,
+  basecovs = NA,
+  outcome_name,
+  ymodel,
+  ymodel_fit_custom = NULL,
+  ymodel_predict_custom = NULL,
+  compevent_name = NULL,
+  compevent_model = NA,
+  compevent_cens = FALSE,
+  censor_name = NULL,
+  censor_model = NA,
+  intvars = NULL,
+  interventions = NULL,
+  int_times = NULL,
+  int_descript = NULL,
+  ref_int = 0,
+  intcomp = NA,
+  visitprocess = NA,
+  restrictions = NA,
+  yrestrictions = NA,
+  compevent_restrictions = NA,
+  baselags = FALSE,
+  nsimul = NA,
+  sim_data_b = FALSE,
+  seed,
+  nsamples = 0,
+  parallel = FALSE,
+  ncores = NA,
+  ci_method = "percentile",
+  threads,
+  model_fits = FALSE,
+  boot_diag = FALSE,
+  show_progress = TRUE,
+  ipw_cutoff_quantile = NULL,
+  ipw_cutoff_value = NULL,
+  int_visit_type = NULL,
+  sim_trunc = TRUE,
+  ...
+)
 }
 \arguments{
 \item{obs_data}{Data table containing the observed data.}
@@ -61,23 +100,37 @@ in \code{histories} is to be applied.}
 
 \item{ymodel}{Model statement for the outcome variable.}
 
+\item{ymodel_fit_custom}{Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
+
+\item{ymodel_predict_custom}{Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
+
 \item{compevent_name}{Character string specifying the name of the competing event variable in \code{obs_data}.}
 
 \item{compevent_model}{Model statement for the competing event variable. The default is \code{NA}.}
 
-\item{intvars}{List, whose elements are vectors of character strings. The kth vector in \code{intvars} specifies the name(s) of the variable(s) to be intervened
+\item{compevent_cens}{Logical scalar indicating whether to treat competing events as censoring events.
+This argument is only applicable for survival outcomes and when a competing even model is supplied (i.e., \code{compevent_name} and \code{compevent_model} are specified).
+If this argument is set to \code{TRUE}, the competing event model will only be used to construct inverse probability weights to estimate the natural course means / risk from the observed data.
+If this argument is set to \code{FALSE}, the competing event model will be used in the parametric g-formula estimates of the risk and will not be used to construct inverse probability weights.
+See "Details". The default is \code{FALSE}.}
+
+\item{censor_name}{Character string specifying the name of the censoring variable in \code{obs_data}. Only applicable when using inverse probability weights to estimate the natural course means / risk from the observed data. See "Details".}
+
+\item{censor_model}{Model statement for the censoring variable. Only applicable when using inverse probability weights to estimate the natural course means / risk from the observed data. See "Details".}
+
+\item{intvars}{(Deprecated. See the \code{...} argument) List, whose elements are vectors of character strings. The kth vector in \code{intvars} specifies the name(s) of the variable(s) to be intervened
 on in each round of the simulation under the kth intervention in \code{interventions}.}
 
-\item{interventions}{List, whose elements are lists of vectors. Each list in \code{interventions} specifies a unique intervention on the relevant variable(s) in \code{intvars}. Each vector contains a function
+\item{interventions}{(Deprecated. See the \code{...} argument) List, whose elements are lists of vectors. Each list in \code{interventions} specifies a unique intervention on the relevant variable(s) in \code{intvars}. Each vector contains a function
 implementing a particular intervention on a single variable, optionally
 followed by one or more "intervention values" (i.e.,
 integers used to specify the treatment regime).}
 
-\item{int_times}{List, whose elements are lists of vectors. The kth list in \code{int_times} corresponds to the kth intervention in \code{interventions}. Each vector specifies the time points in which the relevant intervention is applied on the corresponding variable in \code{intvars}.
+\item{int_times}{(Deprecated. See the \code{...} argument) List, whose elements are lists of vectors. The kth list in \code{int_times} corresponds to the kth intervention in \code{interventions}. Each vector specifies the time points in which the relevant intervention is applied on the corresponding variable in \code{intvars}.
 When an intervention is not applied, the simulated natural course value is used. By default, this argument is set so that all interventions are applied in all time points.}
 
 \item{int_descript}{Vector of character strings, each describing an intervention. It must
-be in same order as the entries in \code{interventions}.}
+be in same order as the specified interventions (see the \code{...} argument).}
 
 \item{ref_int}{Integer denoting the intervention to be used as the
 reference for calculating the risk ratio and risk difference. 0 denotes the
@@ -104,14 +157,14 @@ of that covariate given the condition in the second entry is false such that \em
 of the covariate distribution is available; and its fourth entry a value used by the function in the
 third entry. The default is \code{NA}.}
 
-\item{yrestrictions}{List of vectors. Each vector containins as its first entry
+\item{yrestrictions}{List of vectors. Each vector contains as its first entry
 a condition and its second entry an integer. When the
 condition is \code{TRUE}, the outcome variable is simulated
 according to the fitted model; when the condition is \code{FALSE},
 the outcome variable takes on the value in the second entry.
 The default is \code{NA}.}
 
-\item{compevent_restrictions}{List of vectors. Each vector containins as its first entry
+\item{compevent_restrictions}{List of vectors. Each vector contains as its first entry
 a condition and its second entry an integer. When the
 condition is \code{TRUE}, the competing event variable is simulated
 according to the fitted model; when the condition is \code{FALSE},
@@ -147,15 +200,39 @@ In many applications, users may wish to set this argument equal to \code{paralle
 
 \item{model_fits}{Logical scalar indicating whether to return the fitted models. Note that if this argument is set to \code{TRUE}, the output of this function may use a lot of memory. The default is \code{FALSE}.}
 
-\item{boot_diag}{Logical scalar indicating whether to return the coefficients, standard errors, and variance-covariance matrices of the parameters of the fitted models in the bootstrap samples. The default is \code{FALSE}.}
+\item{boot_diag}{Logical scalar indicating whether to return the parametric g-formula estimates as well as the coefficients, standard errors, and variance-covariance matrices of the parameters of the fitted models in the bootstrap samples. The default is \code{FALSE}.}
 
 \item{show_progress}{Logical scalar indicating whether to print a progress bar for the number of bootstrap samples completed in the R console. This argument is only applicable when \code{parallel} is set to \code{FALSE} and bootstrap samples are used (i.e., \code{nsamples} is set to a value greater than 0). The default is \code{TRUE}.}
 
-\item{...}{Other arguments, which are passed to the functions in \code{covpredict_custom}.}
+\item{ipw_cutoff_quantile}{Percentile by which to truncate inverse probability weights. The default is \code{NULL} (i.e., no truncation). See "Details".}
+
+\item{ipw_cutoff_value}{Cutoff value by which to truncate inverse probability weights. The default is \code{NULL} (i.e., no truncation). See "Details".}
+
+\item{int_visit_type}{Vector of logicals. The kth element is a logical specifying whether to carry forward the intervened value (rather than the natural value) of the treatment variables(s) when performing a carry forward restriction type for the kth intervention in \code{interventions}.
+When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
+By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.}
+
+\item{sim_trunc}{Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.}
+
+\item{...}{Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
+\itemize{
+\item{Each intervention argument begins with a prefix of \code{intervention}.}
+\item{After the prefix, the intervention number is specified and followed by a period.}
+\item{After the period, the treatment variable name is specified.}
+}
+Each intervention argument takes as input a list with the following elements:
+\itemize{
+\item{The first element specifies the intervention function.}
+\item{The subsequent elements specify any intervention values.}
+\item{(Optional) The named element \code{int_times} specifies the time points to apply the intervention. By default, all interventions are applied at all time points.}
+}
+For example, an "always treat" intervention on \code{A} is given by \cr
+\code{intervention1.A = list(static, rep(1, time_points))} \cr
+See the vignette "A Simplified Approach for Specifying Interventions in gfoRmula" and "Examples" section for more examples.}
 }
 \value{
-An object of class \code{gformula_survival}. The object is a list with the following components:
-\item{result}{Results table containing the estimated risk and risk ratio for all interventions (inculding the natural course) at each time point. If bootstrapping was used, the results table includes the bootstrap mean risk ratio, standard error, and 95\% confidence interval.}
+An object of class "gformula_survival". The object is a list with the following components:
+\item{result}{Results table containing the estimated risk and risk ratio for all interventions (inculding the natural course) at each time point as well as the "cumulative percent intervened on" and the "average percent intervened on". If bootstrapping was used, the results table includes the bootstrap mean risk ratio, standard error, and 95\% confidence interval.}
 \item{coeffs}{A list of the coefficients of the fitted models.}
 \item{stderrs}{A list of the standard errors of the coefficients of the fitted models.}
 \item{vcovs}{A list of the variance-covariance matrices of the parameters of the fitted models.}
@@ -163,7 +240,9 @@ An object of class \code{gformula_survival}. The object is a list with the follo
 \item{hazardratio_val}{Hazard ratio between two interventions (if applicable).}
 \item{fits}{A list of the fitted models for the time-varying covariates, outcome, and competing event (if applicable). If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
-\item{bootcoeefs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
+\item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+\item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
+\item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{bootvcovs}{A list, where the kth element is a list containing the variance-covariance matrices of the parameters of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{...}{Some additional elements.}
@@ -172,8 +251,21 @@ The results for the g-formula simulation under various interventions only for th
 }
 \description{
 Based on an observed data set, this internal function estimates the risk over time under multiple
-user-specified interventions using the parametric g-formula. See Lin et al. (2019) for
+user-specified interventions using the parametric g-formula. See McGrath et al. (2020) for
 further details concerning the application and implementation of the parametric g-formula.
+}
+\details{
+To assess model misspecification in the parametric g-formula, users can obtain inverse probability (IP) weighted estimates of the natural course risk and/or means of the time-varying covariates from the observed data.
+See Chiu et al. (2023) for details.
+In addition to the general requirements described in McGrath et al. (2020), the requirements for the input data set and the call to the gformula function for such analyses are described below.
+
+Users need to include a column in \code{obs_data} with a time-varying censoring variable.
+Users need to indicate the name of the censoring variable and a model statement for the censoring variable with parameters \code{censor_name} and \code{censor_model}, respectively.
+When competing events are present, users need to include a column in \code{obs_data} with a time-varying indicator of the competing event variable and need to indicate the name of the competing event variable and the corresponding model statement with parameters \code{compevent_name} and \code{compevent_model}, respectively.
+Users need to indicate whether to treat competing events as censoring events with the \code{compevent_cens} parameter.
+Finally, users can specify how to truncate IP weights with the \code{ipw_cutoff_quantile} or \code{ipw_cutoff_value} parameters.
+
+In addition to the package output described in McGrath et al. (2020), the output will display estimates of the "cumulative percent intervened on" and the "average percent intervened on". When using a custom intervention function, users need to specify whether each individual at that time point is eligible to contribute person-time to the percent intervened on calculations. Specifically, this must be specified in the \code{eligible_pt} column of \code{newdf}. By default, \code{eligible_pt} is set to \code{TRUE} for each individual at each time point in custom interventions.
 }
 \examples{
 ## Estimating the effect of static treatment strategies on risk of a
@@ -194,9 +286,8 @@ covparams <- list(covmodels = c(L1 ~ lag1_A + lag_cumavg1_L1 + lag_cumavg1_L2 +
                                 A ~ lag1_A + L1 + L2 + lag_cumavg1_L1 +
                                   lag_cumavg1_L2 + L3 + t0))
 ymodel <- Y ~ A + L1 + L2 + L3 + lag1_A + lag1_L1 + lag1_L2 + t0
-intvars <- list('A', 'A')
-interventions <- list(list(c(static, rep(0, time_points))),
-                      list(c(static, rep(1, time_points))))
+intervention1.A <- list(static, rep(0, time_points))
+intervention2.A <- list(static, rep(1, time_points))
 int_descript <- c('Never treat', 'Always treat')
 nsimul <- 10000
 
@@ -206,8 +297,8 @@ gform_basic <- gformula_survival(obs_data = basicdata_nocomp, id = id,
                                  outcome_name = outcome_name,
                                  covtypes = covtypes,
                                  covparams = covparams, ymodel = ymodel,
-                                 intvars = intvars,
-                                 interventions = interventions,
+                                 intervention1.A = intervention1.A,
+                                 intervention2.A = intervention2.A,
                                  int_descript = int_descript,
                                  histories = histories, histvars = histvars,
                                  basecovs = c('L3'), nsimul = nsimul,
@@ -237,9 +328,8 @@ covparams <- list(covlink = c('logit', 'identity', 'logit'),
                                   lag_cumavg1_L2 + L3 + as.factor(t0)))
 ymodel <- Y ~ A + L1 + L2 + lag1_A + lag1_L1 + lag1_L2 + L3 + as.factor(t0)
 compevent_model <- D ~ A + L1 + L2 + lag1_A + lag1_L1 + lag1_L2 + L3 + as.factor(t0)
-intvars <- list('A', 'A')
-interventions <- list(list(c(static, rep(0, time_points))),
-                      list(c(static, rep(1, time_points))))
+intervention1.A <- list(static, rep(0, time_points))
+intervention2.A <- list(static, rep(1, time_points))
 int_descript <- c('Never treat', 'Always treat')
 nsimul <- 10000
 
@@ -251,7 +341,8 @@ gform_basic <- gformula_survival(obs_data = basicdata, id = id,
                                  covtypes = covtypes,
                                  covparams = covparams, ymodel = ymodel,
                                  compevent_model = compevent_model,
-                                 intvars = intvars, interventions = interventions,
+                                 intervention1.A = intervention1.A,
+                                 intervention2.A = intervention2.A,
                                  int_descript = int_descript,
                                  histories = histories, histvars = histvars,
                                  basecovs = c('L3'), nsimul = nsimul,
@@ -259,9 +350,35 @@ gform_basic <- gformula_survival(obs_data = basicdata, id = id,
 gform_basic
 }
 
+## Using IP weighting to estimate natural course risk
+## Only the natural course intervention is included for simplicity
+\donttest{
+covnames <- c('L', 'A')
+histories <- c(lagged)
+histvars <- list(c('A', 'L'))
+ymodel <- Y ~ L + A
+covtypes <- c('binary', 'normal')
+covparams <- list(covmodels = c(L ~ lag1_L + lag1_A,
+                                A ~ lag1_L + L + lag1_A))
+censor_name <- 'C'
+censor_model <- C ~ L
+res_censor <- gformula(obs_data = censor_data, id = 'id',
+                       time_name = 't0', covnames = covnames,
+                       outcome_name = 'Y', outcome_type = 'survival',
+                       censor_name = censor_name, censor_model = censor_model,
+                       covtypes = covtypes,
+                       covparams = covparams, ymodel = ymodel,
+                       intvars = NULL, interventions = NULL, int_descript = NULL,
+                       histories = histories, histvars = histvars,
+                       seed = 1234)
+plot(res_censor)
+}
+
 }
 \references{
-Lin V, McGrath S, Zhang Z, Petito LC, Logan RW, Hernán MA, and JG Young. gfoRmula: An R package for estimating effects of general time-varying treatment interventions via the parametric g-formula. arXiv e-prints. 2019. \url{https://arxiv.org/abs/1908.07072}.
+Chiu YH, Wen L, McGrath S, Logan R, Dahabreh IJ, Hernán MA. Evaluating model specification when using the parametric g-formula in the presence of censoring. American Journal of Epidemiology. 2023;192:1887–1895.
+
+McGrath S, Lin V, Zhang Z, Petito LC, Logan RW, Hernán MA, and JG Young. gfoRmula: An R package for estimating the effects of sustained treatment strategies via the parametric g-formula. Patterns. 2020;1:100008.
 
 Robins JM. A new approach to causal inference in mortality studies with a sustained exposure period: application to the healthy worker survivor effect. Mathematical Modelling. 1986;7:1393–1512. [Errata (1987) in Computers and Mathematics with Applications 14, 917.-921. Addendum (1987) in Computers and Mathematics with Applications 14, 923-.945. Errata (1987) to addendum in Computers and Mathematics with Applications 18, 477.].
 }

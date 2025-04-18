@@ -5,9 +5,10 @@
 
 <!-- badges: start -->
 
-[![Travis build
-status](https://travis-ci.org/CausalInference/gfoRmula.svg?branch=master)](https://travis-ci.org/CausalInference/gfoRmula)
-[![CRAN\_Status\_Badge](https://www.r-pkg.org/badges/version/gfoRmula)](https://cran.r-project.org/package=gfoRmula)
+[![CRAN_Status_Badge](https://www.r-pkg.org/badges/version/gfoRmula)](https://cran.r-project.org/package=gfoRmula)
+[![R-CMD-check](https://github.com/CausalInference/gfoRmula/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/CausalInference/gfoRmula/actions/workflows/R-CMD-check.yaml)
+[![Codecov test
+coverage](https://codecov.io/gh/CausalInference/gfoRmula/graph/badge.svg)](https://app.codecov.io/gh/CausalInference/gfoRmula)
 <!-- badges: end -->
 
 ## Installation
@@ -28,5 +29,10 @@ devtools::install_github("CausalInference/gfoRmula")
 
 ## Usage
 
-Please refer to [Lin et al. (2019)](https://arxiv.org/abs/1908.07072)
-for a detailed guide to the `gfoRmula` package.
+Please refer to [McGrath et
+al. (2020)](https://doi.org/10.1016/j.patter.2020.100008) for a detailed
+guide to the `gfoRmula` package. Also, see the following vignettes
+regarding updates since McGrath et al. (2020):
+
+- “A Simplified Approach for Specifying Interventions in gfoRmula”
+- “Using Custom Outcome Models in gfoRmula”

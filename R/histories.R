@@ -35,6 +35,7 @@
 #' time_name <- 't0'
 #' covnames <- c('L1', 'L2', 'A')
 #' outcome_name <- 'Y'
+#' outcome_type <- 'survival'
 #' covtypes <- c('binary', 'bounded normal', 'binary')
 #' histories <- c(lagged, lagavg)
 #' histvars <- list(c('A', 'L1', 'L2'), c('L1', 'L2'))
@@ -45,24 +46,23 @@
 #'                                 A ~ lag1_A + L1 + L2 + lag_cumavg1_L1 +
 #'                                   lag_cumavg1_L2 + L3 + t0))
 #' ymodel <- Y ~ A + L1 + L2 + L3 + lag1_A + lag1_L1 + lag1_L2 + t0
-#' intvars <- list('A', 'A')
-#' interventions <- list(list(c(static, rep(0, time_points))),
-#'                       list(c(static, rep(1, time_points))))
+#' intervention1.A <- list(static, rep(0, time_points))
+#' intervention2.A <- list(static, rep(1, time_points))
 #' int_descript <- c('Never treat', 'Always treat')
 #' nsimul <- 10000
 #'
-#' gform_basic <- gformula_survival(obs_data = basicdata_nocomp, id = id,
-#'                                  time_points = time_points,
-#'                                  time_name = time_name, covnames = covnames,
-#'                                  outcome_name = outcome_name,
-#'                                  covtypes = covtypes,
-#'                                  covparams = covparams, ymodel = ymodel,
-#'                                  intvars = intvars,
-#'                                  interventions = interventions,
-#'                                  int_descript = int_descript,
-#'                                  histories = histories, histvars = histvars,
-#'                                  basecovs = c('L3'), nsimul = nsimul,
-#'                                  seed = 1234)
+#' gform_basic <- gformula(obs_data = basicdata_nocomp, id = id,
+#'                         time_points = time_points,
+#'                         time_name = time_name, covnames = covnames,
+#'                         outcome_name = outcome_name,
+#'                         outcome_type = outcome_type, covtypes = covtypes,
+#'                         covparams = covparams, ymodel = ymodel,
+#'                         intervention1.A = intervention1.A,
+#'                         intervention2.A = intervention2.A,
+#'                         int_descript = int_descript,
+#'                         histories = histories, histvars = histvars,
+#'                         basecovs = c('L3'), nsimul = nsimul,
+#'                         seed = 1234)
 #' gform_basic
 #' }
 #'
@@ -105,6 +105,11 @@ lagged <- function(pool, histvars, histvals, time_name, t, id_name, baselags,
 #' @rdname lagged
 #' @export
 cumavg <- function(pool, histvars, time_name, t, id_name, below_zero_indicator){
+  if (below_zero_indicator){
+    denom <- t + 1 - min(pool[[time_name]])
+  } else {
+    denom <- t + 1
+  }
   if (t == 0 & !below_zero_indicator){
     # At first time point, set all cumulative averages equal to the actual value of the
     # variable
@@ -116,24 +121,40 @@ cumavg <- function(pool, histvars, time_name, t, id_name, below_zero_indicator){
     # At subsequent time points, create new column containing calculated cumulative
     # average until that time point
     current_ids <- unique(pool[get(time_name) == t][[id_name]])
-    id_factor <- is.factor(pool[[id_name]])
-    if (id_factor){
-      lapply(histvars, FUN = function(histvar){
-        pool[get(time_name) == t, (paste("cumavg_", histvar, sep = "")) :=
-               as.double(tapply(pool[get(id_name) %in% current_ids &
-                                       get(time_name) <= t][[histvar]],
-                                droplevels(pool[get(id_name) %in% current_ids &
-                                                  get(time_name) <= t][[id_name]]),
-                                FUN = mean))]
-      })
+    colnam <- colnames(pool)
+    if (!(paste("cumavg_", "_", histvars[1], sep = "") %in% colnam)){
+      # The cumulative average variable was not created yet
+      # Therefore, cannot use recursive formula
+      id_factor <- is.factor(pool[[id_name]])
+      if (id_factor){
+        lapply(histvars, FUN = function(histvar){
+          pool[get(time_name) == t, (paste("cumavg_", histvar, sep = "")) :=
+                 as.double(tapply(pool[get(id_name) %in% current_ids &
+                                         get(time_name) <= t][[histvar]],
+                                  droplevels(pool[get(id_name) %in% current_ids &
+                                                    get(time_name) <= t][[id_name]]),
+                                  FUN = mean))]
+        })
+      } else {
+        lapply(histvars, FUN = function(histvar){
+          pool[get(time_name) == t, (paste("cumavg_", histvar, sep = "")) :=
+                 as.double(tapply(pool[get(id_name) %in% current_ids &
+                                         get(time_name) <= t][[histvar]],
+                                  pool[get(id_name) %in% current_ids &
+                                         get(time_name) <= t][[id_name]], FUN = mean))]
+        })
+      }
     } else {
-      lapply(histvars, FUN = function(histvar){
+      # The cumulative average variable was already created
+      # Therefore, can use recursive formula
+      for (histvar in histvars){
         pool[get(time_name) == t, (paste("cumavg_", histvar, sep = "")) :=
-               as.double(tapply(pool[get(id_name) %in% current_ids &
-                                       get(time_name) <= t][[histvar]],
-                                pool[get(id_name) %in% current_ids &
-                                       get(time_name) <= t][[id_name]], FUN = mean))]
-      })
+               as.double(
+                 (pool[get(id_name) %in% current_ids & get(time_name) == (t-1)][[paste("cumavg_", histvar, sep = "")]] * (denom - 1)
+                  + pool[get(id_name) %in% current_ids & get(time_name) == t][[histvar]]) / denom
+               )
+        ]
+      }
     }
   }
 }
@@ -158,7 +179,7 @@ lagavg <- function(pool, histvars, histvals, time_name, t, id_name, baselags,
         })
       }
 
-    } else if (t == i & !below_zero_indicator){
+    } else if (t == (i + min(pool[[time_name]]))){
       # At time point i, set all lagged cumulative averages equal to the actual value
       # of the variable
       current_ids <- unique(pool[pool[[time_name]] == t][[id_name]])
@@ -166,27 +187,43 @@ lagavg <- function(pool, histvars, histvals, time_name, t, id_name, baselags,
         pool[pool[[time_name]] == t, (paste("lag_cumavg", i, "_", histvar, sep = "")) :=
                as.double(pool[pool[[time_name]] == t - i & get(id_name) %in% current_ids, ][[histvar]])]
       })
-    } else {
+    } else if (t > (i + min(pool[[time_name]]))) {
+
       # At time points after i, create new column containing calculated lagged cumulative
       # average until that time point
       current_ids <- unique(pool[pool[[time_name]] == t][[id_name]])
-      id_factor <- is.factor(pool[[id_name]])
-      if (id_factor){
-        lapply(histvars, FUN = function(histvar){
-          classtmp <- class(pool[pool[[time_name]] == t][[histvar]])
-          myclass <- paste('as.', classtmp, sep = "")
-          pool[pool[[time_name]] == t, (paste("lag_cumavg", i, "_", histvar, sep = "")) :=
-                 as.double(tapply(pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids, ][[histvar]],
-                                  droplevels(pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids][[id_name]]), FUN = mean))]
-        })
+      colnam <- colnames(pool)
+      if (!(paste("lag_cumavg", i, "_", histvars[1], sep = "") %in% colnam)){
+        # The lagged cumulative average variable was not created yet
+        # Therefore, cannot use recursive formula
+        id_factor <- is.factor(pool[[id_name]])
+        if (id_factor){
+          lapply(histvars, FUN = function(histvar){
+            pool[pool[[time_name]] == t, (paste("lag_cumavg", i, "_", histvar, sep = "")) :=
+                   as.double(tapply(pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids, ][[histvar]],
+                                    droplevels(pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids][[id_name]]), FUN = mean))]
+          })
+        } else {
+          lapply(histvars, FUN = function(histvar){
+            pool[pool[[time_name]] == t, (paste("lag_cumavg", i, "_", histvar, sep = "")) :=
+                   as.double(tapply(pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids, ][[histvar]],
+                                    pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids][[id_name]], FUN = mean))]
+          })
+        }
       } else {
-        lapply(histvars, FUN = function(histvar){
-          classtmp <- class(pool[pool[[time_name]] == t][[histvar]])
-          myclass <- paste('as.', classtmp, sep = "")
-          pool[pool[[time_name]] == t, (paste("lag_cumavg", i, "_", histvar, sep = "")) :=
-                 as.double(tapply(pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids, ][[histvar]],
-                                  pool[pool[[time_name]] < t-i+1 & get(id_name) %in% current_ids][[id_name]], FUN = mean))]
-        })
+        if (below_zero_indicator){
+          denom <- t - i + 1 - min(pool[[time_name]])
+        } else {
+          denom <- t - i + 1
+        }
+        # The lagged cumulative average variable was already created
+        # Therefore, can use recursive formula
+        for (histvar in histvars){
+          pool[get(time_name) == t, (paste("lag_cumavg", i, "_", histvar, sep = "")) :=
+                 as.double((pool[get(id_name) %in% current_ids & get(time_name) == (t-1)][[paste("lag_cumavg", i, "_", histvar, sep = "")]] * (denom - 1)
+                            + pool[get(id_name) %in% current_ids & get(time_name) == (t - i)][[histvar]]) / denom)
+          ]
+        }
       }
     }
   }
