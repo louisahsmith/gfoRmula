@@ -4,7 +4,7 @@
 \alias{fit_trunc_normal}
 \title{Fit Truncated Normal Model on Covariate}
 \usage{
-fit_trunc_normal(covparams, obs_data, j, model_fits)
+fit_trunc_normal(covparams, obs_data, j, model_fits, weight_name = NULL)
 }
 \arguments{
 \item{covparams}{List of vectors, where each vector contains information for
@@ -16,6 +16,8 @@ model statement, family, link function, etc.).}
 \item{j}{Integer specifying the index of the covariate.}
 
 \item{model_fits}{Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
 }
 \value{
 Fitted model for the covariate at index \eqn{j}.

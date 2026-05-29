@@ -53,6 +53,11 @@ gformula(
   ipw_cutoff_value = NULL,
   int_visit_type = NULL,
   sim_trunc = TRUE,
+  weight_name = NULL,
+  weighted_models = TRUE,
+  bootstrap_type = "ordinary",
+  psu_name = NULL,
+  strata_name = NULL,
   ...
 )
 }
@@ -82,7 +87,7 @@ do not fall within the pre-defined covariate types. It should be in
 the same order as \code{covnames}. If a custom fit function is not
 required for a particular covariate (e.g., if the first
 covariate is of type \code{"binary"} but the second is of type \code{"custom"}), then that
-index should be set to \code{NA}. The default is \code{NA}.}
+index should be set to \code{NA}. If \code{weight_name} is supplied and a custom fit function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. The default is \code{NA}.}
 
 \item{covpredict_custom}{Vector containing custom prediction functions for time-varying
 covariates that do not fall within the pre-defined covariate types.
@@ -103,7 +108,7 @@ in \code{histories} is to be applied.}
 
 \item{ymodel}{Model statement for the outcome variable.}
 
-\item{ymodel_fit_custom}{Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
+\item{ymodel_fit_custom}{Function specifying a custom outcome model. If \code{weight_name} is supplied and this function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
 
 \item{ymodel_predict_custom}{Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
 
@@ -217,6 +222,16 @@ By default, this argument is set so that the intervened value of the treatment v
 
 \item{sim_trunc}{Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.}
 
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}. The default is \code{NULL}, corresponding to an unweighted analysis.}
+
+\item{weighted_models}{Logical scalar indicating whether to use the sampling weights when fitting the parametric models. This argument is only used when \code{weight_name} is not \code{NULL}. The default is \code{TRUE}.}
+
+\item{bootstrap_type}{Character string specifying whether bootstrap samples should resample individuals (\code{"ordinary"}) or primary sampling units (\code{"psu"}). The default is \code{"ordinary"}.}
+
+\item{psu_name}{Character string specifying the name of the primary sampling unit variable in \code{obs_data}. This argument is required when \code{bootstrap_type = "psu"}.}
+
+\item{strata_name}{Character string specifying the name of the optional strata variable in \code{obs_data}. When supplied with \code{bootstrap_type = "psu"}, PSUs are resampled within strata.}
+
 \item{...}{Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
 \itemize{
 \item{Each intervention argument begins with a prefix of \code{intervention}.}
@@ -244,6 +259,7 @@ An object of class "gformula_survival" (for survival outcomes), "gformula_contin
 \item{fits}{A list of the fitted models for the time-varying covariates, outcome, and competing event (if applicable). If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
 \item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+\item{sampling_weights}{A numeric vector specifying the sampling weights at baseline, if \code{weight_name} is supplied.}
 \item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
@@ -271,6 +287,10 @@ Users need to indicate the name of the censoring variable and a model statement 
 When competing events are present, users need to include a column in \code{obs_data} with a time-varying indicator of the competing event variable and need to indicate the name of the competing event variable and the corresponding model statement with parameters \code{compevent_name} and \code{compevent_model}, respectively.
 Users need to indicate whether to treat competing events as censoring events with the \code{compevent_cens} parameter.
 Finally, users can specify how to truncate IP weights with the \code{ipw_cutoff_quantile} or \code{ipw_cutoff_value} parameters.
+
+\strong{Survey weights}
+
+To target the population represented by a sampling design, users can supply the name of a numeric sampling weight variable with \code{weight_name}. The sampling weights must be positive, finite, non-missing, and constant within individual. When \code{weight_name} is supplied, model-based risks, means, probabilities, contrasts, percent intervened summaries, hazard ratios, and observed natural course summaries are computed as sampling-weighted estimates. By default, parametric models are also fit with the sampling weights; set \code{weighted_models = FALSE} to fit unweighted models while retaining weighted marginal summaries. Custom fit functions can receive these weights by including a formal argument named \code{weights}. Bootstrap uncertainty can use either the ordinary individual-level bootstrap or a PSU bootstrap with \code{bootstrap_type = "psu"}, \code{psu_name}, and optionally \code{strata_name}.
 
 \strong{Percent intervened on}
 
@@ -465,6 +485,48 @@ res_censor <- gformula(obs_data = censor_data, id = 'id',
                        histories = histories, histvars = histvars,
                        seed = 1234)
 plot(res_censor)
+}
+
+## Survey-weighted analysis with a stratified PSU bootstrap
+\donttest{
+id <- 'id'
+time_points <- 7
+time_name <- 't0'
+covnames <- c('L1', 'L2', 'A')
+outcome_name <- 'Y'
+outcome_type <- 'survival'
+covtypes <- c('binary', 'bounded normal', 'binary')
+histories <- c(lagged, lagavg)
+histvars <- list(c('A', 'L1', 'L2'), c('L1', 'L2'))
+covparams <- list(covmodels = c(L1 ~ lag1_A + lag_cumavg1_L1 + lag_cumavg1_L2 +
+                                  L3 + t0,
+                                L2 ~ lag1_A + lag_cumavg1_L1 +
+                                  lag_cumavg1_L2 + L3 + t0,
+                                A ~ lag1_A + L1 + L2 + lag_cumavg1_L1 +
+                                  lag_cumavg1_L2 + L3 + t0))
+ymodel <- Y ~ A + L1 + L2 + L3 + lag1_A + lag1_L1 + lag1_L2 + t0
+survey_data <- data.table::copy(
+  basicdata_nocomp[id \%in\% unique(basicdata_nocomp$id)[1:200]]
+)
+survey_data[, sw := 1 + (id \%\% 5)]
+survey_data[, psu := id \%\% 40]
+survey_data[, strata := id \%\% 4]
+
+gform_survey <- gformula(obs_data = survey_data, id = id,
+                         time_points = time_points,
+                         time_name = time_name, covnames = covnames,
+                         outcome_name = outcome_name,
+                         outcome_type = outcome_type, covtypes = covtypes,
+                         covparams = covparams, ymodel = ymodel,
+                         intervention1.A = list(static, rep(0, time_points)),
+                         int_descript = 'Never treat',
+                         histories = histories, histvars = histvars,
+                         basecovs = c('L3'), nsimul = 200,
+                         seed = 1234, weight_name = 'sw',
+                         nsamples = 2, bootstrap_type = 'psu',
+                         psu_name = 'psu', strata_name = 'strata',
+                         show_progress = FALSE)
+gform_survey
 }
 
 }

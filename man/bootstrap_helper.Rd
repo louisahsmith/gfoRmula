@@ -49,6 +49,11 @@ bootstrap_helper(
   pb,
   int_visit_type,
   sim_trunc,
+  weight_name = NULL,
+  weighted_models = TRUE,
+  bootstrap_type = "ordinary",
+  psu_name = NULL,
+  strata_name = NULL,
   ...
 )
 }
@@ -196,6 +201,16 @@ When the kth element is set to \code{FALSE}, the natural value of the treatment 
 By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.}
 
 \item{sim_trunc}{Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
+
+\item{weighted_models}{Logical scalar indicating whether to use sampling weights when fitting parametric models.}
+
+\item{bootstrap_type}{Character string specifying whether to resample subjects (\code{"ordinary"}) or primary sampling units (\code{"psu"}).}
+
+\item{psu_name}{Character string specifying the name of the primary sampling unit variable in \code{obs_data}.}
+
+\item{strata_name}{Character string specifying the name of the optional strata variable in \code{obs_data}.}
 
 \item{...}{Other arguments}
 }

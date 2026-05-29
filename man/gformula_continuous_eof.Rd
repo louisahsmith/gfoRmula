@@ -46,6 +46,11 @@ gformula_continuous_eof(
   ipw_cutoff_value = NULL,
   int_visit_type = NULL,
   sim_trunc = TRUE,
+  weight_name = NULL,
+  weighted_models = TRUE,
+  bootstrap_type = "ordinary",
+  psu_name = NULL,
+  strata_name = NULL,
   ...
 )
 }
@@ -72,7 +77,7 @@ do not fall within the pre-defined covariate types. It should be in
 the same order as \code{covnames}. If a custom fit function is not
 required for a particular covariate (e.g., if the first
 covariate is of type \code{"binary"} but the second is of type \code{"custom"}), then that
-index should be set to \code{NA}. The default is \code{NA}.}
+index should be set to \code{NA}. If \code{weight_name} is supplied and a custom fit function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. The default is \code{NA}.}
 
 \item{covpredict_custom}{Vector containing custom prediction functions for time-varying
 covariates that do not fall within the pre-defined covariate types.
@@ -91,7 +96,7 @@ in \code{histories} is to be applied.}
 
 \item{ymodel}{Model statement for the outcome variable.}
 
-\item{ymodel_fit_custom}{Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
+\item{ymodel_fit_custom}{Function specifying a custom outcome model. If \code{weight_name} is supplied and this function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
 
 \item{ymodel_predict_custom}{Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.}
 
@@ -185,6 +190,16 @@ By default, this argument is set so that the intervened value of the treatment v
 
 \item{sim_trunc}{Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.}
 
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}. The default is \code{NULL}, corresponding to an unweighted analysis.}
+
+\item{weighted_models}{Logical scalar indicating whether to use the sampling weights when fitting the parametric models. This argument is only used when \code{weight_name} is not \code{NULL}. The default is \code{TRUE}.}
+
+\item{bootstrap_type}{Character string specifying whether bootstrap samples should resample individuals (\code{"ordinary"}) or primary sampling units (\code{"psu"}). The default is \code{"ordinary"}.}
+
+\item{psu_name}{Character string specifying the name of the primary sampling unit variable in \code{obs_data}. This argument is required when \code{bootstrap_type = "psu"}.}
+
+\item{strata_name}{Character string specifying the name of the optional strata variable in \code{obs_data}. When supplied with \code{bootstrap_type = "psu"}, PSUs are resampled within strata.}
+
 \item{...}{Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
 \itemize{
 \item{Each intervention argument begins with a prefix of \code{intervention}.}
@@ -211,6 +226,7 @@ An object of class "gformula_continuous_eof". The object is a list with the foll
 \item{fits}{A list of the fitted models for the time-varying covariates and outcome. If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
 \item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+\item{sampling_weights}{A numeric vector specifying the sampling weights at baseline, if \code{weight_name} is supplied.}
 \item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}

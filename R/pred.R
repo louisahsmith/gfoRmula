@@ -11,16 +11,23 @@
 #' @param obs_data    Data on which the model is fit.
 #' @param j           Integer specifying the index of the covariate.
 #' @param model_fits  Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #'
 #' @return            Fitted model for the covariate at index \eqn{j}.
 #' @keywords internal
 
-fit_glm <- function(covparams, covlink = NA, covfam, obs_data, j, model_fits){
+fit_glm <- function(covparams, covlink = NA, covfam, obs_data, j, model_fits,
+                    weight_name = NULL){
   # Get model parameters
   covmodels <- covparams$covmodels
   if (!is.null(covparams$covlink)){
     covlink <- covparams$covlink
   }
+
+  if (!is.null(weight_name) && covfam == 'binomial'){
+    covfam <- 'quasibinomial'
+  }
+  model_weights <- get_model_weights(obs_data, weight_name)
 
   if (is.na(covlink[j])){
     famtext <- paste(covfam, "()", sep="")
@@ -30,11 +37,14 @@ fit_glm <- function(covparams, covlink = NA, covfam, obs_data, j, model_fits){
 
   # Fit GLM for covariate using user-specified formula
   if (!is.null(covparams$control) && !is.na(covparams$control[j])){
-    fit <- stats::glm(stats::as.formula(paste(covmodels[j])), family = eval(parse(text = famtext)),
-                      data = obs_data, y = TRUE, control = covparams$control[j])
+    fit <- fit_weighted_glm(stats::as.formula(paste(covmodels[j])),
+                            family = eval(parse(text = famtext)),
+                            data = obs_data, y = TRUE, weights = model_weights,
+                            control = covparams$control[j])
   } else {
-    fit <- stats::glm(stats::as.formula(paste(covmodels[j])), family = eval(parse(text = famtext)),
-                      data = obs_data, y = TRUE)
+    fit <- fit_weighted_glm(stats::as.formula(paste(covmodels[j])),
+                            family = eval(parse(text = famtext)),
+                            data = obs_data, y = TRUE, weights = model_weights)
   }
 
   fit$rmse <- add_rmse(fit)
@@ -56,19 +66,24 @@ fit_glm <- function(covparams, covlink = NA, covfam, obs_data, j, model_fits){
 #' @param obs_data    Data on which the model is fit.
 #' @param j           Integer specifying the index of the covariate.
 #' @param model_fits  Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #'
 #' @return            Fitted model for the covariate at index \eqn{j}.
 #' @keywords internal
 
-fit_multinomial <- function(covparams, obs_data, j, model_fits){
+fit_multinomial <- function(covparams, obs_data, j, model_fits,
+                            weight_name = NULL){
   covmodels <- covparams$covmodels
+  model_weights <- get_model_weights(obs_data, weight_name)
   if (!is.null(covparams$control) && !is.na(covparams$control[j])){
     args <- c(list(formula = stats::as.formula(paste(covmodels[j])),
-                   data = obs_data), trace = FALSE, covparams$control[j])
+                   data = obs_data, weights = model_weights),
+              trace = FALSE, covparams$control[j])
     fit <- do.call(nnet::multinom, args = args)
   } else {
     fit <- nnet::multinom(stats::as.formula(paste(covmodels[j])),
-                          data = obs_data, trace = FALSE)
+                          data = obs_data, weights = model_weights,
+                          trace = FALSE)
   }
 
   fit$stderr <- add_stderr(fit)
@@ -93,12 +108,13 @@ fit_multinomial <- function(covparams, obs_data, j, model_fits){
 #' @param obs_data    Data on which the model is fit.
 #' @param j           Integer specifying the index of the covariate.
 #' @param model_fits  Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return            Fitted model for the covariate at index \eqn{j}.
 #' @keywords internal
 #' @import data.table
 
 fit_zeroinfl_normal <- function(covparams, covlink = NA, covname, obs_data, j,
-                                model_fits){
+                                model_fits, weight_name = NULL){
   covmodels <- covparams$covmodels
   if (!is.null(covparams$covlink)){
     covlink <- covparams$covlink
@@ -117,28 +133,36 @@ fit_zeroinfl_normal <- function(covparams, covlink = NA, covname, obs_data, j,
   obs_data[, paste("log_", covname, sep = "")] <- 0
   obs_data[obs_data[[covname]] != 0][, paste("log_", covname, sep = "")] <-
     log(obs_data[obs_data[[covname]] != 0][[covname]])
+  bin_fam <- if (is.null(weight_name)) stats::binomial() else stats::quasibinomial()
+  model_weights <- get_model_weights(obs_data, weight_name)
   # Fit binomial model on indicator of whether covariate is 0 or not
   if (!is.null(covparams$control) && !is.na(covparams$control[j]) &&
       !is.null(covparams$control[j][[1]])){
-    fit1 <- stats::glm(stats::as.formula(paste("I_", covmodels[j], sep = "")), family = stats::binomial(),
-                       control = covparams$control[j][[1]], data = obs_data)
+    fit1 <- fit_weighted_glm(stats::as.formula(paste("I_", covmodels[j], sep = "")),
+                             family = bin_fam, control = covparams$control[j][[1]],
+                             data = obs_data, weights = model_weights)
   } else {
-    fit1 <- stats::glm(stats::as.formula(paste("I_", covmodels[j], sep = "")), family = stats::binomial(),
-                       data = obs_data)
+    fit1 <- fit_weighted_glm(stats::as.formula(paste("I_", covmodels[j], sep = "")),
+                             family = bin_fam, data = obs_data,
+                             weights = model_weights)
   }
 
 
   # Fit Gaussian model on data points for which covariate does not equal 0
   if (!is.null(covparams$control) && !is.na(covparams$control[j]) &&
       !is.null(covparams$control[j][[2]])){
-    fit2 <- stats::glm(stats::as.formula(paste("log_", covmodels[j], sep = "")),
-                       family = eval(parse(text = famtext)),
-                       control = covparams$control[j][[2]],
-                       data = obs_data[obs_data[[covname]] != 0])
+    model_data <- obs_data[obs_data[[covname]] != 0]
+    model_weights2 <- get_model_weights(model_data, weight_name)
+    fit2 <- fit_weighted_glm(stats::as.formula(paste("log_", covmodels[j], sep = "")),
+                             family = eval(parse(text = famtext)),
+                             control = covparams$control[j][[2]],
+                             data = model_data, weights = model_weights2)
   } else {
-    fit2 <- stats::glm(stats::as.formula(paste("log_", covmodels[j], sep = "")),
-                       family = eval(parse(text = famtext)),
-                       data = obs_data[obs_data[[covname]] != 0])
+    model_data <- obs_data[obs_data[[covname]] != 0]
+    model_weights2 <- get_model_weights(model_data, weight_name)
+    fit2 <- fit_weighted_glm(stats::as.formula(paste("log_", covmodels[j], sep = "")),
+                             family = eval(parse(text = famtext)),
+                             data = model_data, weights = model_weights2)
   }
 
   fit1$rmse <- add_rmse(fit1)
@@ -169,12 +193,13 @@ fit_zeroinfl_normal <- function(covparams, covlink = NA, covname, obs_data, j,
 #' @param obs_data    Data on which the model is fit.
 #' @param j           Integer specifying the index of the covariate.
 #' @param model_fits  Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return            Fitted model for the covariate at index \eqn{j}.
 #' @keywords internal
 #' @import data.table
 
 fit_bounded_continuous <- function(covparams, covlink = NA, covname, obs_data,
-                                   j, model_fits){
+                                   j, model_fits, weight_name = NULL){
 
   covmodels <- covparams$covmodels
   if (!is.null(covparams$covlink)){
@@ -183,22 +208,28 @@ fit_bounded_continuous <- function(covparams, covlink = NA, covname, obs_data,
 
   obs_data[, paste("norm_", covname, sep = "")] <-
     (obs_data[[covname]] - min(obs_data[[covname]]))/(max(obs_data[[covname]]) - min(obs_data[[covname]]))
+  model_weights <- get_model_weights(obs_data, weight_name)
   if (!is.na(covlink[j])){
     if (!is.null(covparams$control) && !is.na(covparams$control[j])){
-      fit <- stats::glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")),
-                        family = stats::gaussian(link = covlink[j]), data = obs_data, y = TRUE,
-                        control = covparams$control[j])
+      fit <- fit_weighted_glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")),
+                              family = stats::gaussian(link = covlink[j]),
+                              data = obs_data, y = TRUE, weights = model_weights,
+                              control = covparams$control[j])
     } else {
-      fit <- stats::glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")),
-                        family = stats::gaussian(link = covlink[j]), data = obs_data, y = TRUE)
+      fit <- fit_weighted_glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")),
+                              family = stats::gaussian(link = covlink[j]),
+                              data = obs_data, y = TRUE, weights = model_weights)
     }
   } else {
     if (!is.null(covparams$control) && !is.na(covparams$control[j])){
-      fit <- stats::glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")), family = stats::gaussian(),
-                        data = obs_data, y = TRUE, control = covparams$control[j])
+      fit <- fit_weighted_glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")),
+                              family = stats::gaussian(), data = obs_data,
+                              y = TRUE, weights = model_weights,
+                              control = covparams$control[j])
     } else {
-      fit <- stats::glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")), family = stats::gaussian(),
-                        data = obs_data, y = TRUE)
+      fit <- fit_weighted_glm(stats::as.formula(paste("norm_", covmodels[j], sep = "")),
+                              family = stats::gaussian(), data = obs_data,
+                              y = TRUE, weights = model_weights)
     }
   }
   fit$rmse <- add_rmse(fit)
@@ -221,21 +252,24 @@ fit_bounded_continuous <- function(covparams, covlink = NA, covname, obs_data,
 #' @param obs_data    Data on which the model is fit.
 #' @param j           Integer specifying the index of the covariate.
 #' @param model_fits  Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return            Fitted model for the covariate at index \eqn{j}.
 #' @keywords internal
 
-fit_trunc_normal <- function(covparams, obs_data, j, model_fits){
+fit_trunc_normal <- function(covparams, obs_data, j, model_fits,
+                             weight_name = NULL){
   covmodels <- covparams$covmodels
   point <- covparams$point[j]
   direction <- covparams$direction[j]
+  weights <- get_model_weights(obs_data, weight_name)
   if (!is.null(covparams$control) && !is.na(covparams$control[j])){
     args <- c(list(formula = stats::as.formula(paste(covmodels[j])),
                    data = obs_data, point = point, direction = direction,
-                   y = TRUE), covparams$control[j])
+                   y = TRUE, weights = weights), covparams$control[j])
     fit <- do.call(truncreg::truncreg, args = args)
   } else {
     fit <- truncreg::truncreg(stats::as.formula(paste(covmodels[j])), data = obs_data, point = point,
-                              direction = direction, y = TRUE)
+                              direction = direction, y = TRUE, weights = weights)
   }
 
   fit$rmse <- add_rmse(fit)
@@ -274,12 +308,14 @@ fit_trunc_normal <- function(covparams, obs_data, j, model_fits){
 #' @param time_name       Character string specifying the name of the time variable in \code{obs_data}.
 #' @param obs_data        Data on which the models are fit.
 #' @param model_fits      Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name     Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return                A list of fitted models, one for each covariate in \code{covnames}.
 #' @keywords internal
 #' @import data.table
 
 pred_fun_cov <- function(covparams, covnames, covtypes, covfits_custom,
-                         restrictions, time_name, obs_data, model_fits){
+                         restrictions, time_name, obs_data, model_fits,
+                         weight_name = NULL){
   if (!is.na(restrictions[[1]][[1]])){ # Check for restrictions
     # Create list of covariates whose modeling is affected by restrictions
     restrictnames <- lapply(seq_along(restrictions), FUN = function(r){
@@ -336,25 +372,30 @@ pred_fun_cov <- function(covparams, covnames, covtypes, covfits_custom,
     }
     if (covtypes[j] == 'binary'){
       fit_glm(covparams = covparams, covfam = 'binomial', obs_data = subdata,
-              j = j, model_fits = model_fits)
+              j = j, model_fits = model_fits, weight_name = weight_name)
     } else if (covtypes[j] == 'normal'){
       fit_glm(covparams = covparams, covfam = 'gaussian', obs_data = subdata,
-              j = j, model_fits = model_fits)
+              j = j, model_fits = model_fits, weight_name = weight_name)
     } else if (covtypes[j] == 'categorical'){
       fit_multinomial(covparams, obs_data = subdata, j = j,
-                      model_fits = model_fits)
+                      model_fits = model_fits, weight_name = weight_name)
     } else if (covtypes[j] == 'zero-inflated normal'){
       fit_zeroinfl_normal(covparams, covname = covnames[j], obs_data = subdata,
-                          j = j, model_fits = model_fits)
+                          j = j, model_fits = model_fits, weight_name = weight_name)
     } else if (covtypes[j] == 'bounded normal'){
       fit_bounded_continuous(covparams, covname = covnames[j],
-                             obs_data = subdata, j = j, model_fits = model_fits)
+                             obs_data = subdata, j = j, model_fits = model_fits,
+                             weight_name = weight_name)
     } else if (covtypes[j] == 'truncated normal'){
       fit_trunc_normal(covparams = covparams, obs_data = subdata, j = j,
-                       model_fits = model_fits)
+                       model_fits = model_fits, weight_name = weight_name)
     } else if (covtypes[j] == 'custom'){
-      covfits_custom[[j]](covparams, covname = covnames[j], obs_data = subdata,
-                          j = j)
+      call_custom_fit(
+        fit_fun = covfits_custom[[j]],
+        args = list(covparams = covparams, covname = covnames[j],
+                    obs_data = subdata, j = j),
+        weight_name = weight_name
+      )
     }
   })
   return (fits)
@@ -376,12 +417,14 @@ pred_fun_cov <- function(covparams, covnames, covtypes, covfits_custom,
 #' @param obs_data       Data on which the model is fit.
 #' @param model_fits     Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
 #' @param ymodel_fit_custom Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details.
+#' @param weight_name    Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return               Fitted model for the outcome variable.
 #' @keywords internal
 #' @import data.table
 
 pred_fun_Y <- function(model, yrestrictions, outcome_type, outcome_name,
-                       time_name, obs_data, model_fits, ymodel_fit_custom){
+                       time_name, obs_data, model_fits, ymodel_fit_custom,
+                       weight_name = NULL){
   if (grepl('eof', outcome_type)){
     obs_data <- obs_data[obs_data[[time_name]] == max(unique(obs_data[[time_name]]))]
   }
@@ -401,22 +444,30 @@ pred_fun_Y <- function(model, yrestrictions, outcome_type, outcome_name,
     if (outcome_type == 'continuous' || outcome_type == 'continuous_eof'){
       outcome_fam <- stats::gaussian()
     } else if (outcome_type == 'survival' || outcome_type == 'binary_eof'){
-      outcome_fam <- stats::binomial()
+      outcome_fam <- if (is.null(weight_name)) stats::binomial() else stats::quasibinomial()
     }
     if (!is.na(yrestrictions[[1]][[1]])){ # Check for restrictions on outcome variable modeling
+      model_data <- subset(obs_data, eval(parse(text = condition)))
       # Fit GLM for outcome variable using user-specified model
       if (grepl('continuous', outcome_type)){
         obs_data[, paste("norm_", outcome_name, sep = "")] <-
           (obs_data[[outcome_name]] - min(obs_data[[outcome_name]]))/(max(obs_data[[outcome_name]]) - min(obs_data[[outcome_name]]))
-        fitY <- stats::glm(stats::as.formula(paste("norm_", model, sep = "")), family = outcome_fam,
-                           data = subset(obs_data, eval(parse(text = condition))), y = TRUE)
+        model_data <- subset(obs_data, eval(parse(text = condition)))
+        model_weights <- get_model_weights(model_data, weight_name)
+        fitY <- fit_weighted_glm(stats::as.formula(paste("norm_", model, sep = "")),
+                                 family = outcome_fam, data = model_data,
+                                 y = TRUE, weights = model_weights)
       } else {
-        fitY <- stats::glm(model, family = outcome_fam,
-                           data = subset(obs_data, eval(parse(text = condition))), y = TRUE)
+        model_weights <- get_model_weights(model_data, weight_name)
+        fitY <- fit_weighted_glm(model, family = outcome_fam,
+                                 data = model_data, y = TRUE,
+                                 weights = model_weights)
       }
     } else { # Case where there are no restrictions on outcome variable
       # Fit GLM for outcome variable using user-specified model and entire dataset
-      fitY <- stats::glm(model, family = outcome_fam, data = obs_data, y = TRUE)
+      model_weights <- get_model_weights(obs_data, weight_name)
+      fitY <- fit_weighted_glm(model, family = outcome_fam, data = obs_data,
+                               y = TRUE, weights = model_weights)
     }
     fitY$rmse <- add_rmse(fitY)
     fitY$stderr <- add_stderr(fitY)
@@ -426,9 +477,17 @@ pred_fun_Y <- function(model, yrestrictions, outcome_type, outcome_name,
     }
   } else {
     if (!is.na(yrestrictions[[1]][[1]])){
-      fitY <- ymodel_fit_custom(model, obs_data = subset(obs_data, eval(parse(text = condition))))
+      fitY <- call_custom_fit(
+        fit_fun = ymodel_fit_custom,
+        args = list(ymodel = model, obs_data = subset(obs_data, eval(parse(text = condition)))),
+        weight_name = weight_name
+      )
     } else {
-      fitY <- ymodel_fit_custom(model, obs_data = obs_data)
+      fitY <- call_custom_fit(
+        fit_fun = ymodel_fit_custom,
+        args = list(ymodel = model, obs_data = obs_data),
+        weight_name = weight_name
+      )
     }
   }
   return (fitY)
@@ -447,11 +506,14 @@ pred_fun_Y <- function(model, yrestrictions, outcome_type, outcome_name,
 #'                               second entry.
 #' @param obs_data               Data on which the model is fit.
 #' @param model_fits             Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.
+#' @param weight_name            Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return                       Fitted model for the competing event variable.
 #' @keywords internal
 #' @import data.table
 
-pred_fun_D <- function(model, compevent_restrictions, obs_data, model_fits){
+pred_fun_D <- function(model, compevent_restrictions, obs_data, model_fits,
+                       weight_name = NULL){
+  outcome_fam <- if (is.null(weight_name)) stats::binomial() else stats::quasibinomial()
   if (!is.na(compevent_restrictions[[1]][[1]])){ # Check for restrictions on compevent event variable modeling
     # Set condition where competing event variable is modeled
     condition <- compevent_restrictions[[1]][1]
@@ -464,11 +526,16 @@ pred_fun_D <- function(model, compevent_restrictions, obs_data, model_fits){
     }
     # Fit GLM assuming binomial distribution
     # Restrict data used for modeling to rows where condition is true
-    fitD <- stats::glm(model, family = stats::binomial(),
-                data = subset(obs_data, eval(parse(text = condition))), y = TRUE)
+    model_data <- subset(obs_data, eval(parse(text = condition)))
+    model_weights <- get_model_weights(model_data, weight_name)
+    fitD <- fit_weighted_glm(model, family = outcome_fam,
+                data = model_data, y = TRUE,
+                weights = model_weights)
   } else { # Case where there are no restrictions on competing event variable
     #Fit GLM assuming binomial distribution
-    fitD <- stats::glm(model, family = stats::binomial(), data = obs_data, y = TRUE)
+    model_weights <- get_model_weights(obs_data, weight_name)
+    fitD <- fit_weighted_glm(model, family = outcome_fam, data = obs_data,
+                             y = TRUE, weights = model_weights)
   }
   fitD$rmse <- add_rmse(fitD)
   fitD$stderr <- add_stderr(fitD)

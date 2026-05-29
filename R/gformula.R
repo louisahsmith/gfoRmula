@@ -18,6 +18,10 @@
 #' Users need to indicate whether to treat competing events as censoring events with the \code{compevent_cens} parameter.
 #' Finally, users can specify how to truncate IP weights with the \code{ipw_cutoff_quantile} or \code{ipw_cutoff_value} parameters.
 #'
+#' \strong{Survey weights}
+#'
+#' To target the population represented by a sampling design, users can supply the name of a numeric sampling weight variable with \code{weight_name}. The sampling weights must be positive, finite, non-missing, and constant within individual. When \code{weight_name} is supplied, model-based risks, means, probabilities, contrasts, percent intervened summaries, hazard ratios, and observed natural course summaries are computed as sampling-weighted estimates. By default, parametric models are also fit with the sampling weights; set \code{weighted_models = FALSE} to fit unweighted models while retaining weighted marginal summaries. Custom fit functions can receive these weights by including a formal argument named \code{weights}. Bootstrap uncertainty can use either the ordinary individual-level bootstrap or a PSU bootstrap with \code{bootstrap_type = "psu"}, \code{psu_name}, and optionally \code{strata_name}.
+#'
 #' \strong{Percent intervened on}
 #'
 #' In addition to the package output described in McGrath et al. (2020), the output will display estimates of the "cumulative percent intervened on" and the "average percent intervened on". When using a custom intervention function, users need to specify whether each individual at that time point is eligible to contribute person-time to the percent intervened on calculations. Specifically, this must be specified in the \code{eligible_pt} column of \code{newdf}. By default, \code{eligible_pt} is set to \code{TRUE} for each individual at each time point in custom interventions.
@@ -70,7 +74,7 @@
 #'                                the same order as \code{covnames}. If a custom fit function is not
 #'                                required for a particular covariate (e.g., if the first
 #'                                covariate is of type \code{"binary"} but the second is of type \code{"custom"}), then that
-#'                                index should be set to \code{NA}. The default is \code{NA}.
+#'                                index should be set to \code{NA}. If \code{weight_name} is supplied and a custom fit function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. The default is \code{NA}.
 #' @param covpredict_custom       Vector containing custom prediction functions for time-varying
 #'                                covariates that do not fall within the pre-defined covariate types.
 #'                                It should be in the same order as \code{covnames}. If a custom
@@ -81,7 +85,7 @@
 #'                                in \code{histories} is to be applied.
 #' @param histories               Vector of history functions to apply to the variables specified in \code{histvars}. The default is \code{NA}.
 #' @param ymodel                  Model statement for the outcome variable.
-#' @param ymodel_fit_custom       Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
+#' @param ymodel_fit_custom       Function specifying a custom outcome model. If \code{weight_name} is supplied and this function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param ymodel_predict_custom   Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param yrestrictions           List of vectors. Each vector contains as its first entry
 #'                                a condition and its second entry an integer. When the
@@ -141,6 +145,11 @@
 #'                                When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
 #'                                By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.
 #' @param sim_trunc               Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.
+#' @param weight_name             Character string specifying the name of the sampling weight variable in \code{obs_data}. The default is \code{NULL}, corresponding to an unweighted analysis.
+#' @param weighted_models         Logical scalar indicating whether to use the sampling weights when fitting the parametric models. This argument is only used when \code{weight_name} is not \code{NULL}. The default is \code{TRUE}.
+#' @param bootstrap_type          Character string specifying whether bootstrap samples should resample individuals (\code{"ordinary"}) or primary sampling units (\code{"psu"}). The default is \code{"ordinary"}.
+#' @param psu_name                Character string specifying the name of the primary sampling unit variable in \code{obs_data}. This argument is required when \code{bootstrap_type = "psu"}.
+#' @param strata_name             Character string specifying the name of the optional strata variable in \code{obs_data}. When supplied with \code{bootstrap_type = "psu"}, PSUs are resampled within strata.
 #' @param ...                     Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
 #' \itemize{
 #' \item{Each intervention argument begins with a prefix of \code{intervention}.}
@@ -167,6 +176,7 @@
 #' \item{fits}{A list of the fitted models for the time-varying covariates, outcome, and competing event (if applicable). If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
 #' \item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+#' \item{sampling_weights}{A numeric vector specifying the sampling weights at baseline, if \code{weight_name} is supplied.}
 #' \item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
@@ -362,6 +372,48 @@
 #' plot(res_censor)
 #' }
 #'
+#' ## Survey-weighted analysis with a stratified PSU bootstrap
+#' \donttest{
+#' id <- 'id'
+#' time_points <- 7
+#' time_name <- 't0'
+#' covnames <- c('L1', 'L2', 'A')
+#' outcome_name <- 'Y'
+#' outcome_type <- 'survival'
+#' covtypes <- c('binary', 'bounded normal', 'binary')
+#' histories <- c(lagged, lagavg)
+#' histvars <- list(c('A', 'L1', 'L2'), c('L1', 'L2'))
+#' covparams <- list(covmodels = c(L1 ~ lag1_A + lag_cumavg1_L1 + lag_cumavg1_L2 +
+#'                                   L3 + t0,
+#'                                 L2 ~ lag1_A + lag_cumavg1_L1 +
+#'                                   lag_cumavg1_L2 + L3 + t0,
+#'                                 A ~ lag1_A + L1 + L2 + lag_cumavg1_L1 +
+#'                                   lag_cumavg1_L2 + L3 + t0))
+#' ymodel <- Y ~ A + L1 + L2 + L3 + lag1_A + lag1_L1 + lag1_L2 + t0
+#' survey_data <- data.table::copy(
+#'   basicdata_nocomp[id %in% unique(basicdata_nocomp$id)[1:200]]
+#' )
+#' survey_data[, sw := 1 + (id %% 5)]
+#' survey_data[, psu := id %% 40]
+#' survey_data[, strata := id %% 4]
+#'
+#' gform_survey <- gformula(obs_data = survey_data, id = id,
+#'                          time_points = time_points,
+#'                          time_name = time_name, covnames = covnames,
+#'                          outcome_name = outcome_name,
+#'                          outcome_type = outcome_type, covtypes = covtypes,
+#'                          covparams = covparams, ymodel = ymodel,
+#'                          intervention1.A = list(static, rep(0, time_points)),
+#'                          int_descript = 'Never treat',
+#'                          histories = histories, histvars = histvars,
+#'                          basecovs = c('L3'), nsimul = 200,
+#'                          seed = 1234, weight_name = 'sw',
+#'                          nsamples = 2, bootstrap_type = 'psu',
+#'                          psu_name = 'psu', strata_name = 'strata',
+#'                          show_progress = FALSE)
+#' gform_survey
+#' }
+#'
 #' @import data.table
 #' @export
 
@@ -385,7 +437,9 @@ gformula <- function(obs_data, id, time_points = NULL,
                      ci_method = 'percentile', threads, model_fits = FALSE,
                      boot_diag = FALSE, show_progress = TRUE, ipw_cutoff_quantile = NULL,
                      ipw_cutoff_value = NULL, int_visit_type = NULL,
-                     sim_trunc = TRUE, ...){
+                     sim_trunc = TRUE, weight_name = NULL, weighted_models = TRUE,
+                     bootstrap_type = 'ordinary', psu_name = NULL,
+                     strata_name = NULL, ...){
   if (! outcome_type %in% c('survival', 'continuous_eof', 'binary_eof')){
     stop("outcome_type must be 'survival', 'continuous_eof', or 'binary_eof', but outcome_type was set to", outcome_type)
   }
@@ -418,7 +472,10 @@ gformula <- function(obs_data, id, time_points = NULL,
                       model_fits = model_fits, boot_diag = boot_diag,
                       show_progress = show_progress, ipw_cutoff_quantile = ipw_cutoff_quantile,
                       ipw_cutoff_value = ipw_cutoff_value, int_visit_type = int_visit_type,
-                      sim_trunc = sim_trunc, ...)
+                      sim_trunc = sim_trunc, weight_name = weight_name,
+                      weighted_models = weighted_models,
+                      bootstrap_type = bootstrap_type, psu_name = psu_name,
+                      strata_name = strata_name, ...)
   } else if (outcome_type == 'continuous_eof'){
     gformula_continuous_eof(obs_data = obs_data, id = id,
                             time_name = time_name, covnames = covnames,
@@ -446,7 +503,10 @@ gformula <- function(obs_data, id, time_points = NULL,
                             model_fits = model_fits, boot_diag = boot_diag,
                             show_progress = show_progress, ipw_cutoff_quantile = ipw_cutoff_quantile,
                             ipw_cutoff_value = ipw_cutoff_value, int_visit_type = int_visit_type,
-                            sim_trunc = sim_trunc, ...)
+                            sim_trunc = sim_trunc, weight_name = weight_name,
+                            weighted_models = weighted_models,
+                            bootstrap_type = bootstrap_type, psu_name = psu_name,
+                            strata_name = strata_name, ...)
   } else if (outcome_type == 'binary_eof'){
     gformula_binary_eof(obs_data = obs_data, id = id,
                         time_name = time_name, covnames = covnames,
@@ -472,7 +532,10 @@ gformula <- function(obs_data, id, time_points = NULL,
                         model_fits = model_fits, boot_diag = boot_diag,
                         show_progress = show_progress, ipw_cutoff_quantile = ipw_cutoff_quantile,
                         ipw_cutoff_value = ipw_cutoff_value, int_visit_type = int_visit_type,
-                        sim_trunc = sim_trunc, ...)
+                        sim_trunc = sim_trunc, weight_name = weight_name,
+                        weighted_models = weighted_models,
+                        bootstrap_type = bootstrap_type, psu_name = psu_name,
+                        strata_name = strata_name, ...)
   }
 }
 
@@ -528,7 +591,7 @@ gformula <- function(obs_data, id, time_points = NULL,
 #'                                the same order as \code{covnames}. If a custom fit function is not
 #'                                required for a particular covariate (e.g., if the first
 #'                                covariate is of type \code{"binary"} but the second is of type \code{"custom"}), then that
-#'                                index should be set to \code{NA}. The default is \code{NA}.
+#'                                index should be set to \code{NA}. If \code{weight_name} is supplied and a custom fit function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. The default is \code{NA}.
 #' @param covpredict_custom       Vector containing custom prediction functions for time-varying
 #'                                covariates that do not fall within the pre-defined covariate types.
 #'                                It should be in the same order as \code{covnames}. If a custom
@@ -539,7 +602,7 @@ gformula <- function(obs_data, id, time_points = NULL,
 #'                                in \code{histories} is to be applied.
 #' @param histories               Vector of history functions to apply to the variables specified in \code{histvars}. The default is \code{NA}.
 #' @param ymodel                  Model statement for the outcome variable.
-#' @param ymodel_fit_custom       Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
+#' @param ymodel_fit_custom       Function specifying a custom outcome model. If \code{weight_name} is supplied and this function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param ymodel_predict_custom   Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param yrestrictions           List of vectors. Each vector contains as its first entry
 #'                                a condition and its second entry an integer. When the
@@ -599,6 +662,11 @@ gformula <- function(obs_data, id, time_points = NULL,
 #'                                When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
 #'                                By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.
 #' @param sim_trunc               Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.
+#' @param weight_name             Character string specifying the name of the sampling weight variable in \code{obs_data}. The default is \code{NULL}, corresponding to an unweighted analysis.
+#' @param weighted_models         Logical scalar indicating whether to use the sampling weights when fitting the parametric models. This argument is only used when \code{weight_name} is not \code{NULL}. The default is \code{TRUE}.
+#' @param bootstrap_type          Character string specifying whether bootstrap samples should resample individuals (\code{"ordinary"}) or primary sampling units (\code{"psu"}). The default is \code{"ordinary"}.
+#' @param psu_name                Character string specifying the name of the primary sampling unit variable in \code{obs_data}. This argument is required when \code{bootstrap_type = "psu"}.
+#' @param strata_name             Character string specifying the name of the optional strata variable in \code{obs_data}. When supplied with \code{bootstrap_type = "psu"}, PSUs are resampled within strata.
 #' @param ...                     Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
 #' \itemize{
 #' \item{Each intervention argument begins with a prefix of \code{intervention}.}
@@ -625,6 +693,7 @@ gformula <- function(obs_data, id, time_points = NULL,
 #' \item{fits}{A list of the fitted models for the time-varying covariates, outcome, and competing event (if applicable). If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
 #' \item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+#' \item{sampling_weights}{A numeric vector specifying the sampling weights at baseline, if \code{weight_name} is supplied.}
 #' \item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
@@ -767,7 +836,9 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
                               model_fits = FALSE, boot_diag = FALSE,
                               show_progress = TRUE, ipw_cutoff_quantile = NULL,
                               ipw_cutoff_value = NULL, int_visit_type = NULL,
-                              sim_trunc = TRUE, ...){
+                              sim_trunc = TRUE, weight_name = NULL,
+                              weighted_models = TRUE, bootstrap_type = 'ordinary',
+                              psu_name = NULL, strata_name = NULL, ...){
 
   lag_indicator <- lagavg_indicator <- cumavg_indicator <- c()
   lag_indicator <- update_lag_indicator(covparams$covmodels, lag_indicator)
@@ -888,7 +959,10 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
               comprisk = comprisk, censor = censor, censor_name = censor_name,
               covmodels = covparams$covmodels,
               histvals = histvals, ipw_cutoff_quantile = ipw_cutoff_quantile,
-              ipw_cutoff_value = ipw_cutoff_value, old_convention = old_convention)
+              ipw_cutoff_value = ipw_cutoff_value, old_convention = old_convention,
+              weight_name = weight_name, weighted_models = weighted_models,
+              bootstrap_type = bootstrap_type, psu_name = psu_name,
+              strata_name = strata_name)
 
 
   if (comprisk & compevent_cens){
@@ -903,6 +977,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
 
 
   obs_data <- copy(obs_data)
+  basecovs <- add_weight_to_basecovs(basecovs, weight_name)
 
 
 
@@ -994,29 +1069,34 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
     fitcov <- pred_fun_cov(covparams = covparams, covnames = covnames, covtypes = covtypes,
                            covfits_custom = covfits_custom, restrictions = restrictions,
                            time_name = time_name, obs_data = obs_data_geq_0,
-                           model_fits = model_fits)
+                           model_fits = model_fits,
+                           weight_name = if (weighted_models) weight_name else NULL)
     names(fitcov) <- covnames
   } else {
     fitcov <- NULL
   }
   fitY <- pred_fun_Y(ymodel, yrestrictions, outcome_type, outcome_name, time_name, obs_data_geq_0,
-                     model_fits = model_fits, ymodel_fit_custom = ymodel_fit_custom)
+                     model_fits = model_fits, ymodel_fit_custom = ymodel_fit_custom,
+                     weight_name = if (weighted_models) weight_name else NULL)
 
   # If competing event exists, fit model for competing event variable
   if (comprisk){
     fitD <- pred_fun_D(compevent_model, compevent_restrictions, obs_data_geq_0,
-                       model_fits = model_fits)
+                       model_fits = model_fits,
+                       weight_name = if (weighted_models) weight_name else NULL)
   } else {
     fitD <- NA
   }
   if (comprisk2){
     fitD2 <- pred_fun_D(compevent2_model, NA, obs_data_geq_0,
-                        model_fits = model_fits)
+                        model_fits = model_fits,
+                        weight_name = if (weighted_models) weight_name else NULL)
   } else {
     fitD2 <- NA
   }
   if (censor){
-    fitC <- pred_fun_D(censor_model, NA, obs_data_geq_0, model_fits = model_fits)
+    fitC <- pred_fun_D(censor_model, NA, obs_data_geq_0, model_fits = model_fits,
+                       weight_name = if (weighted_models) weight_name else NULL)
   } else {
     fitC <- NA
   }
@@ -1126,7 +1206,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
     matrix(NA, nrow = length(pools) + 1, ncol = time_points)
 
   # Calculate mean risk over all subjects at each time for natural course
-  nat_result <- tapply(nat_pool$poprisk, nat_pool[[time_name]], FUN = mean)
+  nat_result <- weighted_mean_by_time(nat_pool, 'poprisk', time_name, weight_name)
 
   if (ref_int == 0){
     # Set reference intervention to the natural course
@@ -1134,7 +1214,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
   } else {
     # Set reference intervention as specified
     # Calculate mean risk over all subjects at each time for this intervention
-    ref_result <- tapply(pools[[ref_int]]$poprisk, pools[[ref_int]][[time_name]], FUN = mean)
+    ref_result <- weighted_mean_by_time(pools[[ref_int]], 'poprisk', time_name, weight_name)
   }
 
   # Compile results
@@ -1145,8 +1225,8 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
   # the natural course
   if (length(comb_interventions) > 1){
     for (i in 2:(length(pools) + 1)){
-      int_result[i, ] <- tapply(pools[[i - 1]]$poprisk, pools[[i - 1]][[time_name]],
-                                FUN = mean)
+      int_result[i, ] <- weighted_mean_by_time(pools[[i - 1]], 'poprisk',
+                                               time_name, weight_name)
       result_ratio[i, ] <- int_result[i, ]/ref_result
       result_diff[i, ] <- int_result[i, ] - ref_result
     }
@@ -1157,7 +1237,8 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
     # Generate dataset containing failure/censor time information for each subject
     # under each intervention
     pools_hr <- lapply(seq_along(intcomp), FUN = hr_helper, intcomp = intcomp,
-                       time_name = time_name, pools = pools)
+                       time_name = time_name, pools = pools,
+                       weight_name = weight_name)
     data_hr <- rbindlist(pools_hr)
     names(data_hr)[names(data_hr) == time_name] <- "t0"
     names(data_hr)[names(data_hr) == outcome_name] <- "Y"
@@ -1166,11 +1247,21 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
 
     if (comprisk){
       hr_data <- survival::finegray(survival::Surv(t0, event) ~ ., data = data_hr, etype = "Y")
-      hr_res <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ regime, data = hr_data)
+      hr_weights <- get_hr_weights(hr_data, weight_name, fgwt_name = 'fgwt')
+      hr_res <- fit_weighted_coxph(
+        formula = survival::Surv(fgstart, fgstop, fgstatus) ~ regime,
+        data = hr_data,
+        weights = hr_weights
+      )
       hr_res <- exp(hr_res$coefficients)
     }
     else {
-      hr_res <- survival::coxph(formula = survival::Surv(t0, Y == "1") ~ regime, data = data_hr)
+      hr_weights <- get_hr_weights(data_hr, weight_name)
+      hr_res <- fit_weighted_coxph(
+        formula = survival::Surv(t0, Y == "1") ~ regime,
+        data = data_hr,
+        weights = hr_weights
+      )
       hr_res <- exp(hr_res$coefficients)
     }
     names(hr_res) <- "Est. HR"
@@ -1179,7 +1270,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
   }
 
   # Calculate percent intervened
-  percent_intervened_res <- get_percent_intervened(pools = pools)
+  percent_intervened_res <- get_percent_intervened(pools = pools, weight_name = weight_name)
 
   # Calculate user specified number of bootstrap risk ratios
   if (nsamples > 0){
@@ -1205,7 +1296,10 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
                                       boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
                                       below_zero_indicator = below_zero_indicator, min_time = min_time,
                                       show_progress = FALSE, int_visit_type = int_visit_type,
-                                      sim_trunc = sim_trunc, ...)
+                                      sim_trunc = sim_trunc, weight_name = weight_name,
+                                      weighted_models = weighted_models,
+                                      bootstrap_type = bootstrap_type,
+                                      psu_name = psu_name, strata_name = strata_name, ...)
       parallel::stopCluster(cl)
     } else {
       if (show_progress){
@@ -1233,7 +1327,10 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
                          boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
                          below_zero_indicator = below_zero_indicator, min_time = min_time,
                          show_progress = show_progress, pb = pb, int_visit_type = int_visit_type,
-                         sim_trunc = sim_trunc, ...)
+                         sim_trunc = sim_trunc, weight_name = weight_name,
+                         weighted_models = weighted_models,
+                         bootstrap_type = bootstrap_type, psu_name = psu_name,
+                         strata_name = strata_name, ...)
     }
 
     comb_result <- rbindlist(lapply(final_bs, FUN = function(m){
@@ -1323,7 +1420,8 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
                              outcome_type = outcome_type,
                              obs_data = obs_data_noresample,
                              ipw_cutoff_quantile = ipw_cutoff_quantile,
-                             ipw_cutoff_value = ipw_cutoff_value)
+                             ipw_cutoff_value = ipw_cutoff_value,
+                             weight_name = weight_name)
   obs_results <- plot_info$obs_results
 
   # Generate results table
@@ -1374,7 +1472,9 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
     }
     resultdf[, 'obs_risk' := obs_results[[2]]]
   }
-  obs_risk_name <- ifelse(censor, 'IP weighted risk', 'NP Risk')
+  obs_risk_name <- ifelse(censor,
+                          ifelse(is.null(weight_name), 'IP weighted risk', 'Survey/IP weighted risk'),
+                          ifelse(is.null(weight_name), 'NP Risk', 'Survey weighted NP risk'))
   if (nsamples > 0){
     colnames(resultdf) <- c("k", "Interv.", "g-form risk",
                             "Risk SE", "Risk lower 95% CI",
@@ -1474,6 +1574,12 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
     fits = fits,
     sim_data = sim_data,
     IP_weights = obs_results$w,
+    sampling_weights = if (is.null(weight_name)) NULL else obs_data_noresample[obs_data_noresample[[time_name]] == 0][[weight_name]],
+    weight_name = weight_name,
+    weighted_models = weighted_models,
+    bootstrap_type = bootstrap_type,
+    psu_name = psu_name,
+    strata_name = strata_name,
     bootests = bootests,
     bootcoeffs = bootcoeffs,
     bootstderrs = bootstderrs,
@@ -1538,7 +1644,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
 #'                                the same order as \code{covnames}. If a custom fit function is not
 #'                                required for a particular covariate (e.g., if the first
 #'                                covariate is of type \code{"binary"} but the second is of type \code{"custom"}), then that
-#'                                index should be set to \code{NA}. The default is \code{NA}.
+#'                                index should be set to \code{NA}. If \code{weight_name} is supplied and a custom fit function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. The default is \code{NA}.
 #' @param covpredict_custom       Vector containing custom prediction functions for time-varying
 #'                                covariates that do not fall within the pre-defined covariate types.
 #'                                It should be in the same order as \code{covnames}. If a custom
@@ -1549,7 +1655,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
 #'                                in \code{histories} is to be applied.
 #' @param histories               Vector of history functions to apply to the variables specified in \code{histvars}. The default is \code{NA}.
 #' @param ymodel                  Model statement for the outcome variable.
-#' @param ymodel_fit_custom       Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
+#' @param ymodel_fit_custom       Function specifying a custom outcome model. If \code{weight_name} is supplied and this function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param ymodel_predict_custom   Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param visitprocess            List of vectors. Each vector contains as its first entry
 #'                                the covariate name of a visit process; its second entry
@@ -1595,6 +1701,11 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
 #'                                When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
 #'                                By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.
 #' @param sim_trunc               Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.
+#' @param weight_name             Character string specifying the name of the sampling weight variable in \code{obs_data}. The default is \code{NULL}, corresponding to an unweighted analysis.
+#' @param weighted_models         Logical scalar indicating whether to use the sampling weights when fitting the parametric models. This argument is only used when \code{weight_name} is not \code{NULL}. The default is \code{TRUE}.
+#' @param bootstrap_type          Character string specifying whether bootstrap samples should resample individuals (\code{"ordinary"}) or primary sampling units (\code{"psu"}). The default is \code{"ordinary"}.
+#' @param psu_name                Character string specifying the name of the primary sampling unit variable in \code{obs_data}. This argument is required when \code{bootstrap_type = "psu"}.
+#' @param strata_name             Character string specifying the name of the optional strata variable in \code{obs_data}. When supplied with \code{bootstrap_type = "psu"}, PSUs are resampled within strata.
 #' @param ...                     Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
 #' \itemize{
 #' \item{Each intervention argument begins with a prefix of \code{intervention}.}
@@ -1620,6 +1731,7 @@ gformula_survival <- function(obs_data, id, time_points = NULL,
 #' \item{fits}{A list of the fitted models for the time-varying covariates and outcome. If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
 #' \item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+#' \item{sampling_weights}{A numeric vector specifying the sampling weights at baseline, if \code{weight_name} is supplied.}
 #' \item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
@@ -1692,7 +1804,10 @@ gformula_continuous_eof <- function(obs_data, id,
                                     model_fits = FALSE, boot_diag = FALSE,
                                     show_progress = TRUE, ipw_cutoff_quantile = NULL,
                                     ipw_cutoff_value = NULL, int_visit_type = NULL,
-                                    sim_trunc = TRUE, ...){
+                                    sim_trunc = TRUE, weight_name = NULL,
+                                    weighted_models = TRUE,
+                                    bootstrap_type = 'ordinary',
+                                    psu_name = NULL, strata_name = NULL, ...){
 
   lag_indicator <- lagavg_indicator <- cumavg_indicator <- c()
   lag_indicator <- update_lag_indicator(covparams$covmodels, lag_indicator)
@@ -1817,12 +1932,16 @@ gformula_continuous_eof <- function(obs_data, id,
               comprisk = comprisk, censor = censor, censor_name = censor_name,
               covmodels = covparams$covmodels,
               histvals = histvals, ipw_cutoff_quantile = ipw_cutoff_quantile,
-              ipw_cutoff_value = ipw_cutoff_value, old_convention = old_convention)
+              ipw_cutoff_value = ipw_cutoff_value, old_convention = old_convention,
+              weight_name = weight_name, weighted_models = weighted_models,
+              bootstrap_type = bootstrap_type, psu_name = psu_name,
+              strata_name = strata_name)
 
   min_time <- min(obs_data[[time_name]])
   below_zero_indicator <- min_time < 0
 
   obs_data <- copy(obs_data)
+  basecovs <- add_weight_to_basecovs(basecovs, weight_name)
 
 
 
@@ -1911,15 +2030,18 @@ gformula_continuous_eof <- function(obs_data, id,
     fitcov <- pred_fun_cov(covparams = covparams, covnames = covnames, covtypes = covtypes,
                            covfits_custom = covfits_custom, restrictions = restrictions,
                            time_name = time_name, obs_data = obs_data_geq_0,
-                           model_fits = model_fits)
+                           model_fits = model_fits,
+                           weight_name = if (weighted_models) weight_name else NULL)
     names(fitcov) <- covnames
   } else {
     fitcov <- NULL
   }
   fitY <- pred_fun_Y(ymodel, yrestrictions, outcome_type, outcome_name, time_name, obs_data_geq_0,
-                     model_fits = model_fits, ymodel_fit_custom = ymodel_fit_custom)
+                     model_fits = model_fits, ymodel_fit_custom = ymodel_fit_custom,
+                     weight_name = if (weighted_models) weight_name else NULL)
   if (censor){
-    fitC <- pred_fun_D(censor_model, NA, obs_data_geq_0, model_fits = model_fits)
+    fitC <- pred_fun_D(censor_model, NA, obs_data_geq_0, model_fits = model_fits,
+                       weight_name = if (weighted_models) weight_name else NULL)
   } else {
     fitC <- NA
   }
@@ -2023,7 +2145,7 @@ gformula_continuous_eof <- function(obs_data, id,
   result_ratio <- result_diff <- int_result <- rep(NA, length(pools) + 1)
 
   # Calculate mean outcome over all subjects at each time for natural course
-  nat_result <- mean(nat_pool$Ey, na.rm = TRUE)
+  nat_result <- weighted_mean_all(nat_pool, 'Ey', weight_name)
 
   if (ref_int == 0){
     # Set reference intervention to the natural course
@@ -2031,7 +2153,7 @@ gformula_continuous_eof <- function(obs_data, id,
   } else {
     # Set reference intervention as specified
     # Calculate mean outcome over all subjects at each time for this intervention
-    ref_mean <- mean(pools[[ref_int]]$Ey, na.rm = TRUE)
+    ref_mean <- weighted_mean_all(pools[[ref_int]], 'Ey', weight_name)
   }
 
   # Compile results
@@ -2039,13 +2161,15 @@ gformula_continuous_eof <- function(obs_data, id,
   # Calculate mean risk over all subjects at each time for all interventions other than
   # the natural course
   if (length(comb_interventions) > 1){
-    int_result[-1] <- sapply(pools, FUN = function(pool){mean(pool$Ey, na.rm = TRUE)})
+    int_result[-1] <- sapply(pools, FUN = function(pool){
+      weighted_mean_all(pool, 'Ey', weight_name)
+    })
   }
   result_ratio <- int_result / ref_mean
   result_diff <- int_result - ref_mean
 
   # Calculate percent intervened
-  percent_intervened_res <- get_percent_intervened(pools = pools)
+  percent_intervened_res <- get_percent_intervened(pools = pools, weight_name = weight_name)
 
   if (nsamples > 0){
     if (parallel){
@@ -2070,7 +2194,10 @@ gformula_continuous_eof <- function(obs_data, id,
                                       boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
                                       below_zero_indicator = below_zero_indicator, min_time = min_time,
                                       show_progress = FALSE, int_visit_type = int_visit_type,
-                                      sim_trunc = sim_trunc, ...)
+                                      sim_trunc = sim_trunc, weight_name = weight_name,
+                                      weighted_models = weighted_models,
+                                      bootstrap_type = bootstrap_type,
+                                      psu_name = psu_name, strata_name = strata_name, ...)
       parallel::stopCluster(cl)
 
     } else {
@@ -2099,7 +2226,10 @@ gformula_continuous_eof <- function(obs_data, id,
                          boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
                          below_zero_indicator = below_zero_indicator, min_time = min_time,
                          show_progress = show_progress, pb = pb, int_visit_type = int_visit_type,
-                         sim_trunc = sim_trunc, ...)
+                         sim_trunc = sim_trunc, weight_name = weight_name,
+                         weighted_models = weighted_models,
+                         bootstrap_type = bootstrap_type, psu_name = psu_name,
+                         strata_name = strata_name, ...)
     }
     comb_result <- rbindlist(lapply(final_bs, FUN = function(m){
       as.data.table(t(m$Result))
@@ -2170,7 +2300,8 @@ gformula_continuous_eof <- function(obs_data, id,
                              outcome_type = outcome_type,
                              obs_data = obs_data_noresample,
                              ipw_cutoff_quantile = ipw_cutoff_quantile,
-                             ipw_cutoff_value = ipw_cutoff_value)
+                             ipw_cutoff_value = ipw_cutoff_value,
+                             weight_name = weight_name)
   obs_results <- plot_info$obs_results
 
   # Generate results table
@@ -2215,7 +2346,9 @@ gformula_continuous_eof <- function(obs_data, id,
   }
 
   resultdf$obs_risk <- c(utils::tail(obs_results[[2]], 1), rep(NA, dim(resultdf)[1] - 1))
-  obs_mean_name <- ifelse(censor, 'IP weighted mean', 'NP mean')
+  obs_mean_name <- ifelse(censor,
+                          ifelse(is.null(weight_name), 'IP weighted mean', 'Survey/IP weighted mean'),
+                          ifelse(is.null(weight_name), 'NP mean', 'Survey weighted NP mean'))
   if (nsamples > 0){
     colnames(resultdf) <- c("k", "Interv.", "g-form mean",
                             "Mean SE",
@@ -2301,6 +2434,12 @@ gformula_continuous_eof <- function(obs_data, id,
     fits = fits,
     sim_data = sim_data,
     IP_weights = obs_results$w,
+    sampling_weights = if (is.null(weight_name)) NULL else obs_data_noresample[obs_data_noresample[[time_name]] == 0][[weight_name]],
+    weight_name = weight_name,
+    weighted_models = weighted_models,
+    bootstrap_type = bootstrap_type,
+    psu_name = psu_name,
+    strata_name = strata_name,
     bootests = bootests,
     bootcoeffs = bootcoeffs,
     bootstderrs = bootstderrs,
@@ -2362,7 +2501,7 @@ gformula_continuous_eof <- function(obs_data, id,
 #'                                the same order as \code{covnames}. If a custom fit function is not
 #'                                required for a particular covariate (e.g., if the first
 #'                                covariate is of type \code{"binary"} but the second is of type \code{"custom"}), then that
-#'                                index should be set to \code{NA}. The default is \code{NA}.
+#'                                index should be set to \code{NA}. If \code{weight_name} is supplied and a custom fit function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. The default is \code{NA}.
 #' @param covpredict_custom       Vector containing custom prediction functions for time-varying
 #'                                covariates that do not fall within the pre-defined covariate types.
 #'                                It should be in the same order as \code{covnames}. If a custom
@@ -2373,7 +2512,7 @@ gformula_continuous_eof <- function(obs_data, id,
 #'                                in \code{histories} is to be applied.
 #' @param histories               Vector of history functions to apply to the variables specified in \code{histvars}. The default is \code{NA}.
 #' @param ymodel                  Model statement for the outcome variable.
-#' @param ymodel_fit_custom       Function specifying a custom outcome model. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
+#' @param ymodel_fit_custom       Function specifying a custom outcome model. If \code{weight_name} is supplied and this function includes a formal argument named \code{weights}, the sampling weights for the model-fitting data are passed to that argument. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param ymodel_predict_custom   Function obtaining predictions from the custom outcome model specified in \code{ymodel_fit_custom}. See the vignette "Using Custom Outcome Models in gfoRmula" for details. The default is \code{NULL}.
 #' @param visitprocess            List of vectors. Each vector contains as its first entry
 #'                                the covariate name of a visit process; its second entry
@@ -2419,6 +2558,11 @@ gformula_continuous_eof <- function(obs_data, id,
 #'                                When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
 #'                                By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.
 #' @param sim_trunc               Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}. The default is \code{TRUE}.
+#' @param weight_name             Character string specifying the name of the sampling weight variable in \code{obs_data}. The default is \code{NULL}, corresponding to an unweighted analysis.
+#' @param weighted_models         Logical scalar indicating whether to use the sampling weights when fitting the parametric models. This argument is only used when \code{weight_name} is not \code{NULL}. The default is \code{TRUE}.
+#' @param bootstrap_type          Character string specifying whether bootstrap samples should resample individuals (\code{"ordinary"}) or primary sampling units (\code{"psu"}). The default is \code{"ordinary"}.
+#' @param psu_name                Character string specifying the name of the primary sampling unit variable in \code{obs_data}. This argument is required when \code{bootstrap_type = "psu"}.
+#' @param strata_name             Character string specifying the name of the optional strata variable in \code{obs_data}. When supplied with \code{bootstrap_type = "psu"}, PSUs are resampled within strata.
 #' @param ...                     Other arguments, including (a) those that specify the interventions and (b) those that are passed to the functions in \code{covpredict_custom}. To specify interventions, users can supply arguments with the following naming requirements
 #' \itemize{
 #' \item{Each intervention argument begins with a prefix of \code{intervention}.}
@@ -2444,6 +2588,7 @@ gformula_continuous_eof <- function(obs_data, id,
 #' \item{fits}{A list of the fitted models for the time-varying covariates and outcome. If \code{model_fits} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{sim_data}{A list of data tables of the simulated data. Each element in the list corresponds to one of the interventions. If the argument \code{sim_data_b} is set to \code{FALSE}, a value of \code{NA} is given.}
 #' \item{IP_weights}{A numeric vector specifying the inverse probability weights. See "Details".}
+#' \item{sampling_weights}{A numeric vector specifying the sampling weights at baseline, if \code{weight_name} is supplied.}
 #' \item{bootests}{A data.table containing the bootstrap replicates of the parametric g-formula estimates. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootcoeffs}{A list, where the kth element is a list containing the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
 #' \item{bootstderrs}{A list, where the kth element is a list containing the standard errors of the coefficients of the fitted models corresponding to the kth bootstrap sample. If \code{boot_diag} is set to \code{FALSE}, a value of \code{NULL} is given.}
@@ -2518,7 +2663,10 @@ gformula_binary_eof <- function(obs_data, id,
                                 model_fits = FALSE, boot_diag = FALSE,
                                 show_progress = TRUE, ipw_cutoff_quantile = NULL,
                                 ipw_cutoff_value = NULL, int_visit_type = NULL,
-                                sim_trunc = TRUE, ...){
+                                sim_trunc = TRUE, weight_name = NULL,
+                                weighted_models = TRUE,
+                                bootstrap_type = 'ordinary',
+                                psu_name = NULL, strata_name = NULL, ...){
 
   lag_indicator <- lagavg_indicator <- cumavg_indicator <- c()
   lag_indicator <- update_lag_indicator(covparams$covmodels, lag_indicator)
@@ -2641,12 +2789,16 @@ gformula_binary_eof <- function(obs_data, id,
               comprisk = comprisk, censor = censor, censor_name = censor_name,
               covmodels = covparams$covmodels,
               histvals = histvals, ipw_cutoff_quantile = ipw_cutoff_quantile,
-              ipw_cutoff_value = ipw_cutoff_value, old_convention = old_convention)
+              ipw_cutoff_value = ipw_cutoff_value, old_convention = old_convention,
+              weight_name = weight_name, weighted_models = weighted_models,
+              bootstrap_type = bootstrap_type, psu_name = psu_name,
+              strata_name = strata_name)
 
   min_time <- min(obs_data[[time_name]])
   below_zero_indicator <- min_time < 0
 
   obs_data <- copy(obs_data)
+  basecovs <- add_weight_to_basecovs(basecovs, weight_name)
 
 
 
@@ -2731,15 +2883,18 @@ gformula_binary_eof <- function(obs_data, id,
     fitcov <- pred_fun_cov(covparams = covparams, covnames = covnames, covtypes = covtypes,
                            covfits_custom = covfits_custom, restrictions = restrictions,
                            time_name = time_name, obs_data = obs_data_geq_0,
-                           model_fits = model_fits)
+                           model_fits = model_fits,
+                           weight_name = if (weighted_models) weight_name else NULL)
     names(fitcov) <- covnames
   } else {
     fitcov <- NULL
   }
   fitY <- pred_fun_Y(ymodel, yrestrictions, outcome_type, outcome_name, time_name, obs_data_geq_0,
-                     model_fits = model_fits, ymodel_fit_custom = ymodel_fit_custom)
+                     model_fits = model_fits, ymodel_fit_custom = ymodel_fit_custom,
+                     weight_name = if (weighted_models) weight_name else NULL)
   if (censor){
-    fitC <- pred_fun_D(censor_model, NA, obs_data_geq_0, model_fits = model_fits)
+    fitC <- pred_fun_D(censor_model, NA, obs_data_geq_0, model_fits = model_fits,
+                       weight_name = if (weighted_models) weight_name else NULL)
   } else {
     fitC <- NA
   }
@@ -2844,7 +2999,7 @@ gformula_binary_eof <- function(obs_data, id,
   result_ratio <- result_diff <- int_result <- rep(NA, length(pools) + 1)
 
   # Calculate mean outcome over all subjects at each time for natural course
-  nat_result <- mean(nat_pool$Py, na.rm = TRUE)
+  nat_result <- weighted_mean_all(nat_pool, 'Py', weight_name)
 
   if (ref_int == 0){
     # Set reference intervention to the natural course
@@ -2852,7 +3007,7 @@ gformula_binary_eof <- function(obs_data, id,
   } else {
     # Set reference intervention as specified
     # Calculate mean outcome over all subjects at each time for this intervention
-    ref_mean <- mean(pools[[ref_int]]$Py, na.rm = TRUE)
+    ref_mean <- weighted_mean_all(pools[[ref_int]], 'Py', weight_name)
   }
 
   # Compile results
@@ -2860,13 +3015,15 @@ gformula_binary_eof <- function(obs_data, id,
   # Calculate mean risk over all subjects at each time for all interventions other than
   # the natural course
   if (length(comb_interventions) > 1){
-    int_result[-1] <- sapply(pools, FUN = function(pool){mean(pool$Py, na.rm = TRUE)})
+    int_result[-1] <- sapply(pools, FUN = function(pool){
+      weighted_mean_all(pool, 'Py', weight_name)
+    })
   }
   result_ratio <- int_result / ref_mean
   result_diff <- int_result - ref_mean
 
   # Calculate percent intervened
-  percent_intervened_res <- get_percent_intervened(pools = pools)
+  percent_intervened_res <- get_percent_intervened(pools = pools, weight_name = weight_name)
 
   if (nsamples > 0){
     if (parallel){
@@ -2891,7 +3048,10 @@ gformula_binary_eof <- function(obs_data, id,
                                       boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
                                       below_zero_indicator = below_zero_indicator, min_time = min_time,
                                       show_progress = FALSE, int_visit_type = int_visit_type,
-                                      sim_trunc = sim_trunc, ...)
+                                      sim_trunc = sim_trunc, weight_name = weight_name,
+                                      weighted_models = weighted_models,
+                                      bootstrap_type = bootstrap_type,
+                                      psu_name = psu_name, strata_name = strata_name, ...)
       parallel::stopCluster(cl)
 
     } else {
@@ -2920,7 +3080,10 @@ gformula_binary_eof <- function(obs_data, id,
                          boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
                          below_zero_indicator = below_zero_indicator, min_time = min_time,
                          show_progress = show_progress, pb = pb, int_visit_type = int_visit_type,
-                         sim_trunc = sim_trunc, ...)
+                         sim_trunc = sim_trunc, weight_name = weight_name,
+                         weighted_models = weighted_models,
+                         bootstrap_type = bootstrap_type, psu_name = psu_name,
+                         strata_name = strata_name, ...)
     }
     comb_result <- rbindlist(lapply(final_bs, FUN = function(m){
       as.data.table(t(m$Result))
@@ -2991,7 +3154,8 @@ gformula_binary_eof <- function(obs_data, id,
                              outcome_type = outcome_type,
                              obs_data = obs_data_noresample,
                              ipw_cutoff_quantile = ipw_cutoff_quantile,
-                             ipw_cutoff_value = ipw_cutoff_value)
+                             ipw_cutoff_value = ipw_cutoff_value,
+                             weight_name = weight_name)
   obs_results <- plot_info$obs_results
 
   # Generate results table
@@ -3036,7 +3200,9 @@ gformula_binary_eof <- function(obs_data, id,
   }
 
   resultdf[, 'obs_risk' := c(utils::tail(obs_results[[2]], 1), rep(NA, dim(resultdf)[1] - 1))]
-  obs_mean_name <- ifelse(censor, 'IP weighted mean', 'NP mean')
+  obs_mean_name <- ifelse(censor,
+                          ifelse(is.null(weight_name), 'IP weighted mean', 'Survey/IP weighted mean'),
+                          ifelse(is.null(weight_name), 'NP mean', 'Survey weighted NP mean'))
   if (nsamples > 0){
     colnames(resultdf) <- c("k", "Interv.", "g-form mean",
                             "Mean SE",
@@ -3122,6 +3288,12 @@ gformula_binary_eof <- function(obs_data, id,
     fits = fits,
     sim_data = sim_data,
     IP_weights = obs_results$w,
+    sampling_weights = if (is.null(weight_name)) NULL else obs_data_noresample[obs_data_noresample[[time_name]] == 0][[weight_name]],
+    weight_name = weight_name,
+    weighted_models = weighted_models,
+    bootstrap_type = bootstrap_type,
+    psu_name = psu_name,
+    strata_name = strata_name,
     bootests = bootests,
     bootcoeffs = bootcoeffs,
     bootstderrs = bootstderrs,

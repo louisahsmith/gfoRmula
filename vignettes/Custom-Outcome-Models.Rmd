@@ -18,11 +18,21 @@ By default, the \verb|gfoRmula| package uses a pooled logistic regression model 
 
 To specify custom outcome models, users must provide functions that fit the outcome model and obtain estimates from the fitted model through the parameters \verb|ymodel_fit_custom| and \verb|ymodel_predict_custom|, respectively, in the \verb|gformula| function. 
 
-The function for fitting the outcome model must take the parameters \verb|ymodel| and \verb|obs_data|. Below, we illustrate a function for fitting an outcome model using a random forest. This code uses the \verb|randomForest| package.
+The function for fitting the outcome model must take the parameters \verb|ymodel| and \verb|obs_data|. If the analysis uses sampling weights through \verb|weight_name|, the fit function can also include an optional \verb|weights| argument. When that argument is present, \verb|gformula| passes the row-level sampling weights for the data used to fit the custom outcome model. Existing custom fit functions that only take \verb|ymodel| and \verb|obs_data| continue to work, but they fit an unweighted custom outcome model.
+
+Below, we illustrate a function for fitting an outcome model using a random forest. This code uses the \verb|randomForest| package.
 
 ```{r}
 ymodel_fit_custom <- function(ymodel, obs_data){
   return(randomForest::randomForest(formula = ymodel, data = obs_data))
+}
+```
+
+For a custom fitting function whose underlying model supports case weights, include \verb|weights| explicitly and pass it to that model. For example:
+
+```{r, eval=FALSE}
+ymodel_fit_custom <- function(ymodel, obs_data, weights = NULL){
+  stats::glm(formula = ymodel, data = obs_data, weights = weights)
 }
 ```
 

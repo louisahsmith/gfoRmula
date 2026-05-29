@@ -20,6 +20,7 @@
 #' @param obs_data        Data table containing the observed data.
 #' @param ipw_cutoff_quantile Percentile by which to truncate inverse probability weights.
 #' @param ipw_cutoff_value    Cutoff value by which to truncate inverse probability weights.
+#' @param weight_name     Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return                A list. Its first entry is a list of mean covariate values at each time point;
 #'                        its second entry is a vector of the mean observed risk (for \code{"survival"}
 #'                        outcome types) or the mean observed outcome (for \code{"continuous_eof"} and
@@ -28,12 +29,13 @@
 #' @keywords internal
 #' @import data.table
 obs_calculate <- function(outcome_name, compevent_name, compevent2_name, censor_name, time_name, id, covnames, covtypes, comprisk,
-                          comprisk2, censor, fitD2, fitC, outcome_type, obs_data, ipw_cutoff_quantile, ipw_cutoff_value){
+                          comprisk2, censor, fitD2, fitC, outcome_type, obs_data, ipw_cutoff_quantile, ipw_cutoff_value,
+                          weight_name = NULL){
 
   time_points <- max(obs_data[[time_name]]) + 1
   get_obs_cov_means <- function(weights = FALSE){
     if (!weights){
-      w <- rep(1, nrow(obs_data))
+      w <- get_weight_values(obs_data, weight_name)
     }
     obs_means <- vector(mode = 'list', length = length(covnames))
     names(obs_means) <- covnames
@@ -44,7 +46,7 @@ obs_calculate <- function(outcome_name, compevent_name, compevent2_name, censor_
         for (i in 0:(time_points-1)){
           cur_time_ind <- obs_data[[time_name]] == i
           if (i == 0){
-            cov_means[i+1] <- mean(obs_data[cur_time_ind][[covname]], na.rm = TRUE)
+            cov_means[i+1] <- weighted_mean_na(obs_data[cur_time_ind][[covname]], w[cur_time_ind])
           } else {
             individuals_at_cur_time <- obs_data[obs_data[[time_name]] == i][[id]]
             prev_time_ind <- obs_data[[id]] %in% individuals_at_cur_time & obs_data[[time_name]] == (i - 1)
@@ -56,14 +58,16 @@ obs_calculate <- function(outcome_name, compevent_name, compevent2_name, censor_
         cov_means <- data.table(t0 = rep(0:(time_points - 1), each = length(all_levels)),
                                 V1 = rep(-1, length = time_points * length(all_levels)))
         cov_means[, (covname)] <- rep(all_levels, times = time_points)
-        obs_est_name <- ifelse(censor, 'IP weighted estimates', 'nonparametric estimates')
+        obs_est_name <- ifelse(censor,
+                               ifelse(is.null(weight_name), 'IP weighted estimates', 'survey/IP weighted estimates'),
+                               ifelse(is.null(weight_name), 'nonparametric estimates', 'survey weighted nonparametric estimates'))
         cov_means$legend <- obs_est_name
         row_ind <- 1
         for (i in 0:(time_points - 1)){
           cur_time_ind <- obs_data[[time_name]] == i
           if (i == 0){
             for (level in all_levels){
-              cov_means[row_ind, 'V1'] <- mean(obs_data[cur_time_ind][[covname]] == level, na.rm = TRUE)
+              cov_means[row_ind, 'V1'] <- weighted_mean_na(obs_data[cur_time_ind][[covname]] == level, w[cur_time_ind])
               row_ind <- row_ind + 1
             }
           } else {
@@ -94,16 +98,17 @@ obs_calculate <- function(outcome_name, compevent_name, compevent2_name, censor_
       comprisk_p0_inv[row_ind] <- 1 / (1 - stats::predict(fitD2, type = 'response', newdata = obs_data[row_ind]))
       comprisk_inv_cum <- unlist(tapply(comprisk_p0_inv, obs_data[[id]], FUN = cumprod))
       w_d <- ifelse(obs_data[[compevent2_name]] == 1 | is.na(obs_data[[compevent2_name]]), 0, comprisk_inv_cum)
-      w <- w_c * w_d
+      w_ip <- w_c * w_d
     } else {
-      w <- w_c
+      w_ip <- w_c
     }
     if (!is.null(ipw_cutoff_quantile)){
-      cutoff_w <- stats::quantile(w, probs = ipw_cutoff_quantile)
-      w <- pmin(w, cutoff_w)
+      cutoff_w <- stats::quantile(w_ip, probs = ipw_cutoff_quantile)
+      w_ip <- pmin(w_ip, cutoff_w)
     } else if (!is.null(ipw_cutoff_value)){
-      w <- pmin(w, ipw_cutoff_value)
+      w_ip <- pmin(w_ip, ipw_cutoff_value)
     }
+    w <- get_weight_values(obs_data, weight_name) * w_ip
 
     # Step 2: Compute weighted mean of covariates
     obs_means <- get_obs_cov_means(weights = TRUE)
@@ -155,12 +160,10 @@ obs_calculate <- function(outcome_name, compevent_name, compevent2_name, censor_
 
     if (outcome_type == 'survival'){
       # Calculate mean observed outcome probability at each time point
-      meanPy <- tapply(obs_data[[outcome_name]], obs_data[[time_name]], FUN = mean,
-                       na.rm = TRUE)
+      meanPy <- weighted_mean_by_time(obs_data, outcome_name, time_name, weight_name)
       if (comprisk){
         # Calculate mean observed competing event probability at each time point
-        meanPd <- tapply(obs_data[[compevent_name]], obs_data[[time_name]], FUN = mean,
-                         na.rm = TRUE)
+        meanPd <- weighted_mean_by_time(obs_data, compevent_name, time_name, weight_name)
       }
       # Initialize
       obs_prodp0 <- 1 - meanPy
@@ -189,8 +192,7 @@ obs_calculate <- function(outcome_name, compevent_name, compevent2_name, censor_
       res <- list(obs_means, obs_risk, obs_survival, w = NULL)
 
     } else if (outcome_type == 'continuous_eof' || outcome_type == 'binary_eof'){
-      meanEy <- tapply(obs_data[[outcome_name]], obs_data[[time_name]], FUN = mean,
-                       na.rm = TRUE)
+      meanEy <- weighted_mean_by_time(obs_data, outcome_name, time_name, weight_name)
       res <- list(obs_means, meanEy, w = NULL)
     }
   }
@@ -253,6 +255,7 @@ rmse_calculate <- function(i, fits, covnames, covtypes){
 #' @param obs_data        Data table containing observed data.
 #' @param ipw_cutoff_quantile    Percentile by which to truncate inverse probability weights.
 #' @param ipw_cutoff_value       Cutoff value by which to truncate inverse probability weights.
+#' @param weight_name     Character string specifying the name of the sampling weight variable in \code{obs_data}.
 #' @return                A list with the following components:
 #' \item{obs_results}{A list of the mean observed values at each time point for covariates and - if the outcome is of type \code{"survival"} - the risk and survival.}
 #' \item{dt_cov_plot}{A list of data tables The data tables contain the observed and simulated mean values of the covariates under each time point.}
@@ -262,7 +265,8 @@ rmse_calculate <- function(i, fits, covnames, covtypes){
 #' @import ggplot2
 get_plot_info <- function(outcome_name, compevent_name, compevent2_name, censor_name, time_name, id, time_points,
                           covnames, covtypes, nat_pool, nat_result, comprisk, comprisk2, censor,
-                          fitD2, fitC, outcome_type, obs_data, ipw_cutoff_quantile, ipw_cutoff_value){
+                          fitD2, fitC, outcome_type, obs_data, ipw_cutoff_quantile, ipw_cutoff_value,
+                          weight_name = NULL){
 
   # Calculate mean observed values at each time point for covariates, risk, and survival
   obs_results <- obs_calculate(outcome_name = outcome_name, compevent_name = compevent_name,
@@ -274,7 +278,8 @@ get_plot_info <- function(outcome_name, compevent_name, compevent2_name, censor_
                                obs_data = obs_data[obs_data[[time_name]] < time_points &
                                           obs_data[[time_name]] >= 0],
                                ipw_cutoff_quantile = ipw_cutoff_quantile,
-                               ipw_cutoff_value = ipw_cutoff_value)
+                               ipw_cutoff_value = ipw_cutoff_value,
+                               weight_name = weight_name)
 
   get_sim_cov_means <- function(weights = FALSE){
     get_weights <- function(weights, cur_time_ind){
@@ -306,7 +311,8 @@ get_plot_info <- function(outcome_name, compevent_name, compevent2_name, censor_
         for (i in 0:(time_points - 1)){
           cur_time_ind <- nat_pool[[time_name]] == i
           psurv <- get_weights(weights = weights, cur_time_ind = cur_time_ind)
-          cov_means[i+1] <- mean(nat_pool[cur_time_ind][[covname]] * psurv) / mean(psurv)
+          sim_weights <- psurv * get_weight_values(nat_pool[cur_time_ind], weight_name)
+          cov_means[i+1] <- weighted_mean_na(nat_pool[cur_time_ind][[covname]], sim_weights)
         }
       } else if (covtype == 'categorical') {
         all_levels <- levels(as.factor(obs_data[[covname]]))
@@ -318,8 +324,9 @@ get_plot_info <- function(outcome_name, compevent_name, compevent2_name, censor_
         for (i in 0:(time_points - 1)){
           cur_time_ind <- nat_pool[[time_name]] == i
           psurv <- get_weights(weights = weights, cur_time_ind = cur_time_ind)
+          sim_weights <- psurv * get_weight_values(nat_pool[cur_time_ind], weight_name)
           for (level in all_levels){
-            cov_means[row_ind, 'V1'] <- mean((nat_pool[cur_time_ind][[covname]] == level) * psurv) / mean(psurv)
+            cov_means[row_ind, 'V1'] <- weighted_mean_na(nat_pool[cur_time_ind][[covname]] == level, sim_weights)
             row_ind <- row_ind + 1
           }
         }
@@ -340,12 +347,14 @@ get_plot_info <- function(outcome_name, compevent_name, compevent2_name, censor_
   }
 
   if (outcome_type == 'survival'){
-    sim_results_surv <- tapply(nat_pool$survival, nat_pool[[time_name]], FUN = mean)
+    sim_results_surv <- weighted_mean_by_time(nat_pool, 'survival', time_name, weight_name)
     sim_results <- list(sim_results_cov, nat_result, sim_results_surv)
   } else {
     sim_results <- list(sim_results_cov)
   }
-  obs_est_name <- ifelse(censor, 'IP weighted estimates', 'nonparametric estimates')
+  obs_est_name <- ifelse(censor,
+                         ifelse(is.null(weight_name), 'IP weighted estimates', 'survey/IP weighted estimates'),
+                         ifelse(is.null(weight_name), 'nonparametric estimates', 'survey weighted nonparametric estimates'))
 
   # Generate data tables for plotting each covariate
   dt_cov_plot <- lapply(seq_along(covnames), FUN = function(i){

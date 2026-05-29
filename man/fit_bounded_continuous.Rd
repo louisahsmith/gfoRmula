@@ -10,7 +10,8 @@ fit_bounded_continuous(
   covname,
   obs_data,
   j,
-  model_fits
+  model_fits,
+  weight_name = NULL
 )
 }
 \arguments{
@@ -27,6 +28,8 @@ model statement, family, link function, etc.).}
 \item{j}{Integer specifying the index of the covariate.}
 
 \item{model_fits}{Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
 }
 \value{
 Fitted model for the covariate at index \eqn{j}.

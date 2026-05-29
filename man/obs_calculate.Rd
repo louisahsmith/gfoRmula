@@ -21,7 +21,8 @@ obs_calculate(
   outcome_type,
   obs_data,
   ipw_cutoff_quantile,
-  ipw_cutoff_value
+  ipw_cutoff_value,
+  weight_name = NULL
 )
 }
 \arguments{
@@ -58,6 +59,8 @@ obs_calculate(
 \item{ipw_cutoff_quantile}{Percentile by which to truncate inverse probability weights.}
 
 \item{ipw_cutoff_value}{Cutoff value by which to truncate inverse probability weights.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
 }
 \value{
 A list. Its first entry is a list of mean covariate values at each time point;

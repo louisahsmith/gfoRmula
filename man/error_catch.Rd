@@ -36,7 +36,12 @@ error_catch(
   histvals,
   ipw_cutoff_quantile,
   ipw_cutoff_value,
-  old_convention
+  old_convention,
+  weight_name,
+  weighted_models,
+  bootstrap_type,
+  psu_name,
+  strata_name
 )
 }
 \arguments{
@@ -115,6 +120,16 @@ appears in any of the model statements.}
 \item{ipw_cutoff_value}{Cutoff value by which to truncate inverse probability weights.}
 
 \item{old_convention}{Logical scalar indicating whether the "old" intervention convention was used (i.e., by specifying \code{interventions}, \code{intvars}, and \code{int_times}).}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
+
+\item{weighted_models}{Logical scalar indicating whether to use sampling weights when fitting parametric models.}
+
+\item{bootstrap_type}{Character string specifying whether to use the ordinary subject-level bootstrap or a PSU-level bootstrap.}
+
+\item{psu_name}{Character string specifying the name of the primary sampling unit variable in \code{obs_data}.}
+
+\item{strata_name}{Character string specifying the name of the optional strata variable in \code{obs_data}.}
 }
 \value{
 No value is returned.

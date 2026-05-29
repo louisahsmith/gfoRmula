@@ -105,6 +105,11 @@
 #'                                When the kth element is set to \code{FALSE}, the natural value of the treatment variable(s) in the kth intervention in \code{interventions} will be carried forward.
 #'                                By default, this argument is set so that the intervened value of the treatment variable(s) is carried forward for all interventions.
 #' @param sim_trunc               Logical scalar indicating whether to truncate simulated covariates to their range in the observed data set. This argument is only applicable for covariates of type \code{"normal"}, \code{"bounded normal"}, \code{"truncated normal"}, and \code{"zero-inflated normal"}.
+#' @param weight_name             Character string specifying the name of the sampling weight variable in \code{obs_data}.
+#' @param weighted_models         Logical scalar indicating whether to use sampling weights when fitting parametric models.
+#' @param bootstrap_type          Character string specifying whether to resample subjects (\code{"ordinary"}) or primary sampling units (\code{"psu"}).
+#' @param psu_name                Character string specifying the name of the primary sampling unit variable in \code{obs_data}.
+#' @param strata_name             Character string specifying the name of the optional strata variable in \code{obs_data}.
 #' @param ...                     Other arguments
 #' @return                        A list with the following components:
 #' \item{Result}{Matrix containing risks over time under the natural course and under each user-specified intervention.}
@@ -126,14 +131,18 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
                              ranges, parallel, ncores, max_visits,
                              hazardratio, intcomp, boot_diag, nsimul, baselags,
                              below_zero_indicator, min_time, show_progress, pb,
-                             int_visit_type, sim_trunc, ...){
+                             int_visit_type, sim_trunc, weight_name = NULL,
+                             weighted_models = TRUE, bootstrap_type = 'ordinary',
+                             psu_name = NULL, strata_name = NULL, ...){
 
   set.seed(bootseeds[r])
 
-  data_len <- length(unique(obs_data$newid))
-  ids <- as.data.table(sample(1:data_len, data_len, replace = TRUE))
-  ids[, 'bid' := 1:data_len]
-  colnames(ids) <- c("newid", "bid")
+  ids <- resample_bootstrap_ids(
+    obs_data = obs_data,
+    bootstrap_type = bootstrap_type,
+    psu_name = psu_name,
+    strata_name = strata_name
+  )
   resample_data <- copy(obs_data)
   setkey(resample_data, "newid")
   resample_data <- resample_data[J(ids), allow.cartesian = TRUE]  # create the new data set names "sample"
@@ -146,11 +155,15 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
   fitcov <- pred_fun_cov(covparams = covparams, covnames = covnames, covtypes = covtypes,
                          covfits_custom = covfits_custom, restrictions = restrictions,
                          time_name = time_name, obs_data = resample_data_geq_0,
-                         model_fits = FALSE)
+                         model_fits = FALSE,
+                         weight_name = if (weighted_models) weight_name else NULL)
   fitY <- pred_fun_Y(ymodel, yrestrictions, outcome_type, outcome_name, time_name, resample_data_geq_0,
-                     model_fits = FALSE, ymodel_fit_custom = ymodel_fit_custom)
+                     model_fits = FALSE, ymodel_fit_custom = ymodel_fit_custom,
+                     weight_name = if (weighted_models) weight_name else NULL)
   if (comprisk){
-    fitD <- pred_fun_D(compevent_model, compevent_restrictions, resample_data_geq_0, model_fits = FALSE)
+    fitD <- pred_fun_D(compevent_model, compevent_restrictions, resample_data_geq_0,
+                       model_fits = FALSE,
+                       weight_name = if (weighted_models) weight_name else NULL)
   } else {
     fitD <- NA
   }
@@ -223,19 +236,19 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
 
   # Calculate mean risk at each time point under natural course
   if (grepl('eof', outcome_type)){
-    nat_result <- mean(nat_pool[[param]], na.rm = TRUE)
+    nat_result <- weighted_mean_all(nat_pool, param, weight_name)
   } else {
-    nat_result <- tapply(nat_pool[[param]], nat_pool[[time_name]], FUN = mean)
+    nat_result <- weighted_mean_by_time(nat_pool, param, time_name, weight_name)
   }
 
   if (ref_int == 0){
     ref_result <- nat_result
   } else {
     if (grepl('eof', outcome_type)){
-      ref_result <- mean(pools[[ref_int]][[param]], na.rm = TRUE)
+      ref_result <- weighted_mean_all(pools[[ref_int]], param, weight_name)
     } else {
       # Calculate mean risk at each time point for specified reference intervention
-      ref_result <- tapply(pools[[ref_int]][[param]], pools[[ref_int]][[time_name]], FUN = mean)
+      ref_result <- weighted_mean_by_time(pools[[ref_int]], param, time_name, weight_name)
     }
   }
 
@@ -244,7 +257,7 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
   if (grepl('eof', outcome_type)){
     int_result[1] <- nat_result
     int_result[-1] <- sapply(pools, FUN = function(pool){
-      mean(pool[[param]], na.rm = TRUE)
+      weighted_mean_all(pool, param, weight_name)
     })
     result_ratio <- int_result / ref_result
     result_diff <- int_result - ref_result
@@ -254,7 +267,7 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
     result_diff[1, ] <- int_result[1, ] - ref_result
     if (length(comb_interventions) > 1){
       for (i in 2:(length(pools) + 1)){
-        int_result[i, ] <- tapply(pools[[i - 1]][[param]], pools[[i - 1]][[time_name]], FUN = mean)
+        int_result[i, ] <- weighted_mean_by_time(pools[[i - 1]], param, time_name, weight_name)
         result_ratio[i, ] <- int_result[i, ] / ref_result
         result_diff[i, ] <- int_result[i, ] - ref_result
       }
@@ -266,7 +279,8 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
     # Generate dataset containing failure/censor time information for each subject
     # under each intervention
     pools_hr <- lapply(seq_along(intcomp), FUN = hr_helper, intcomp = intcomp,
-                       time_name = time_name, pools = pools)
+                       time_name = time_name, pools = pools,
+                       weight_name = weight_name)
     data_hr <- rbindlist(pools_hr)
     names(data_hr)[names(data_hr) == time_name] <- "t0"
     names(data_hr)[names(data_hr) == outcome_name] <- "Y"
@@ -276,12 +290,22 @@ bootstrap_helper <- function(r, time_points, obs_data, bootseeds, outcome_type,
     if (comprisk){
       # Calculate subdistribution hazard ratio
       hr_data <- survival::finegray(survival::Surv(t0, event) ~ ., data = data_hr, etype = "Y")
-      hr_res <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ regime, data = hr_data)
+      hr_weights <- get_hr_weights(hr_data, weight_name, fgwt_name = 'fgwt')
+      hr_res <- fit_weighted_coxph(
+        formula = survival::Surv(fgstart, fgstop, fgstatus) ~ regime,
+        data = hr_data,
+        weights = hr_weights
+      )
       hr_res <- exp(hr_res$coefficients)
     }
     else {
       # Calculate cause-specific hazard ratio
-      hr_res <- survival::coxph(formula = survival::Surv(t0, Y == "1") ~ regime, data = data_hr)
+      hr_weights <- get_hr_weights(data_hr, weight_name)
+      hr_res <- fit_weighted_coxph(
+        formula = survival::Surv(t0, Y == "1") ~ regime,
+        data = data_hr,
+        weights = hr_weights
+      )
       hr_res <- exp(hr_res$coefficients)
     }
     if (is.na(hr_res)){
@@ -342,7 +366,9 @@ bootstrap_helper_with_trycatch <- function(r, time_points, obs_data, bootseeds, 
                              ranges, parallel, ncores, max_visits,
                              hazardratio, intcomp, boot_diag, nsimul, baselags,
                              below_zero_indicator, min_time, show_progress, pb,
-                             int_visit_type, sim_trunc, ...){
+                             int_visit_type, sim_trunc, weight_name = NULL,
+                             weighted_models = TRUE, bootstrap_type = 'ordinary',
+                             psu_name = NULL, strata_name = NULL, ...){
   tryCatch({
     bootstrap_helper(
       r = r, time_points = time_points, obs_data = obs_data, bootseeds = bootseeds, outcome_type = outcome_type,
@@ -355,7 +381,10 @@ bootstrap_helper_with_trycatch <- function(r, time_points, obs_data, bootseeds, 
       ranges = ranges, parallel = parallel, ncores = ncores, max_visits = max_visits,
       hazardratio = hazardratio, intcomp = intcomp, boot_diag = boot_diag, nsimul = nsimul, baselags = baselags,
       below_zero_indicator = below_zero_indicator, min_time = min_time, show_progress = show_progress, pb = pb,
-      int_visit_type = int_visit_type, sim_trunc = sim_trunc, ...)
+      int_visit_type = int_visit_type, sim_trunc = sim_trunc,
+      weight_name = weight_name, weighted_models = weighted_models,
+      bootstrap_type = bootstrap_type, psu_name = psu_name,
+      strata_name = strata_name, ...)
   },
   error = function(e){
     warning(paste0('An error occured in bootstrap replicate ', r,

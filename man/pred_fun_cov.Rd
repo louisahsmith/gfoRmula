@@ -12,7 +12,8 @@ pred_fun_cov(
   restrictions,
   time_name,
   obs_data,
-  model_fits
+  model_fits,
+  weight_name = NULL
 )
 }
 \arguments{
@@ -46,6 +47,8 @@ third entry. The default is \code{NA}.}
 \item{obs_data}{Data on which the models are fit.}
 
 \item{model_fits}{Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
 }
 \value{
 A list of fitted models, one for each covariate in \code{covnames}.

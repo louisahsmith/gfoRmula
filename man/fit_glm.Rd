@@ -4,7 +4,15 @@
 \alias{fit_glm}
 \title{Fit GLM on Covariate}
 \usage{
-fit_glm(covparams, covlink = NA, covfam, obs_data, j, model_fits)
+fit_glm(
+  covparams,
+  covlink = NA,
+  covfam,
+  obs_data,
+  j,
+  model_fits,
+  weight_name = NULL
+)
 }
 \arguments{
 \item{covparams}{List of vectors, where each vector contains information for
@@ -21,6 +29,8 @@ used for fitting the GLM.}
 \item{j}{Integer specifying the index of the covariate.}
 
 \item{model_fits}{Logical scalar indicating whether to return the fitted models. The default is \code{FALSE}.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable in \code{obs_data}.}
 }
 \value{
 Fitted model for the covariate at index \eqn{j}.

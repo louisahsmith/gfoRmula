@@ -4,7 +4,7 @@
 \alias{hr_helper}
 \title{Format Simulated Dataset for Hazard Ratio Calculation}
 \usage{
-hr_helper(i, intcomp, time_name, pools)
+hr_helper(i, intcomp, time_name, pools, weight_name = NULL)
 }
 \arguments{
 \item{i}{Integer specifying the index \code{intcomp}.}
@@ -16,6 +16,8 @@ hr_helper(i, intcomp, time_name, pools)
 \item{pools}{Data table containing the simulated values for the covariates, outcome
 probabilities, competing event probabilities, outcomes, and competing
 events.}
+
+\item{weight_name}{Character string specifying the name of the sampling weight variable.}
 }
 \value{
 Data table consisting of failure time information for each individual or the last time

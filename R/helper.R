@@ -8,12 +8,17 @@
 #' @param pools       Data table containing the simulated values for the covariates, outcome
 #'                    probabilities, competing event probabilities, outcomes, and competing
 #'                    events.
+#' @param weight_name Character string specifying the name of the sampling weight variable.
 #' @return            Data table consisting of failure time information for each individual or the last time
 #'                    point information (for individuals who do not experience an event).
 #' @keywords internal
 #' @import data.table
-hr_helper <- function(i, intcomp, time_name, pools){
-  pool <- pools[[intcomp[[i]]]][, .SD, .SDcols = c("id", time_name, "Y", "D")]
+hr_helper <- function(i, intcomp, time_name, pools, weight_name = NULL){
+  hr_cols <- c("id", time_name, "Y", "D")
+  if (!is.null(weight_name)){
+    hr_cols <- c(hr_cols, weight_name)
+  }
+  pool <- pools[[intcomp[[i]]]][, .SD, .SDcols = hr_cols]
   event_ids <- unique(pool[pool$Y == 1 | pool$D == 1]$id)
   # Take failure time for each ID
   new_pool <- pool[pool$Y == 1 | pool$D == 1][, .SD[1], id]
@@ -29,6 +34,131 @@ hr_helper <- function(i, intcomp, time_name, pools){
 
   set(new_pool, j = 'regime', value = i - 1)
   return (new_pool)
+}
+
+get_hr_weights <- function(data, weight_name, fgwt_name = NULL){
+  weights <- rep(1, nrow(data))
+  if (!is.null(weight_name) && weight_name %in% names(data)){
+    weights <- weights * data[[weight_name]]
+  }
+  if (!is.null(fgwt_name) && fgwt_name %in% names(data)){
+    weights <- weights * data[[fgwt_name]]
+  }
+  if (all(weights == 1)){
+    return(NULL)
+  }
+  return(weights)
+}
+
+get_weight_values <- function(data, weight_name){
+  if (is.null(weight_name)){
+    return(rep(1, nrow(data)))
+  }
+  return(data[[weight_name]])
+}
+
+weighted_mean_na <- function(x, w){
+  if (length(x) == 0 || all(is.na(x))){
+    return(NA_real_)
+  }
+  return(stats::weighted.mean(x = x, w = w, na.rm = TRUE))
+}
+
+weighted_mean_by_time <- function(data, value_name, time_name, weight_name){
+  times <- sort(unique(data[[time_name]]))
+  stats::setNames(vapply(times, FUN = function(t){
+    cur_time_ind <- data[[time_name]] == t
+    weighted_mean_na(
+      x = data[cur_time_ind][[value_name]],
+      w = get_weight_values(data[cur_time_ind], weight_name)
+    )
+  }, FUN.VALUE = numeric(1)), times)
+}
+
+weighted_mean_all <- function(data, value_name, weight_name){
+  weighted_mean_na(
+    x = data[[value_name]],
+    w = get_weight_values(data, weight_name)
+  )
+}
+
+add_weight_to_basecovs <- function(basecovs, weight_name){
+  if (is.null(weight_name)){
+    return(basecovs)
+  }
+  if (!is.null(basecovs) && any(weight_name %in% basecovs)){
+    return(basecovs)
+  }
+  if (length(basecovs) == 0 || is.na(basecovs[[1]])){
+    return(weight_name)
+  }
+  return(c(basecovs, weight_name))
+}
+
+get_model_weights <- function(obs_data, weight_name){
+  if (is.null(weight_name)){
+    return(NULL)
+  }
+  return(obs_data[[weight_name]])
+}
+
+call_custom_fit <- function(fit_fun, args, weight_name = NULL){
+  arg_names <- names(formals(fit_fun))
+  if (!is.null(weight_name)){
+    model_data <- args$obs_data
+    if ("weights" %in% arg_names){
+      args$weights <- get_model_weights(model_data, weight_name)
+    }
+    if ("weight_name" %in% arg_names){
+      args$weight_name <- weight_name
+    }
+  }
+  return(do.call(fit_fun, args = args))
+}
+
+fit_weighted_glm <- function(formula, family, data, y = TRUE, control = NULL,
+                             weights = NULL){
+  args <- list(formula = formula, family = family, data = data, y = y)
+  if (!is.null(control)){
+    args$control <- control
+  }
+  if (!is.null(weights)){
+    args$weights <- weights
+  }
+  return(do.call(stats::glm, args = args))
+}
+
+fit_weighted_coxph <- function(formula, data, weights = NULL){
+  args <- list(formula = formula, data = data)
+  if (!is.null(weights)){
+    args$weights <- weights
+  }
+  return(do.call(survival::coxph, args = args))
+}
+
+resample_bootstrap_ids <- function(obs_data, bootstrap_type, psu_name, strata_name){
+  data_len <- length(unique(obs_data$newid))
+
+  if (bootstrap_type == 'ordinary'){
+    ids <- as.data.table(sample(1:data_len, data_len, replace = TRUE))
+    ids[, 'bid' := 1:data_len]
+    colnames(ids) <- c("newid", "bid")
+    return(ids)
+  }
+
+  if (is.null(strata_name)){
+    id_psus <- unique(obs_data[, .(newid, psu = get(psu_name))])
+    id_psus[, 'strata' := "all"]
+  } else {
+    id_psus <- unique(obs_data[, .(newid, psu = get(psu_name), strata = get(strata_name))])
+  }
+  psus <- unique(id_psus[, .(psu, strata)])
+  sampled_psus <- psus[, .(psu = sample(psu, .N, replace = TRUE)), by = strata]
+  sampled_psus[, 'boot_psu' := seq_len(.N)]
+  ids <- merge(sampled_psus, id_psus, by = c("strata", "psu"), allow.cartesian = TRUE)
+  ids[, 'bid' := seq_len(.N)]
+  ids <- ids[, .(newid, bid)]
+  return(ids)
 }
 
 #' General Error Catching
@@ -79,6 +209,11 @@ hr_helper <- function(i, intcomp, time_name, pools){
 #' @param ipw_cutoff_quantile    Percentile by which to truncate inverse probability weights.
 #' @param ipw_cutoff_value       Cutoff value by which to truncate inverse probability weights.
 #' @param old_convention         Logical scalar indicating whether the "old" intervention convention was used (i.e., by specifying \code{interventions}, \code{intvars}, and \code{int_times}).
+#' @param weight_name            Character string specifying the name of the sampling weight variable in \code{obs_data}.
+#' @param weighted_models        Logical scalar indicating whether to use sampling weights when fitting parametric models.
+#' @param bootstrap_type         Character string specifying whether to use the ordinary subject-level bootstrap or a PSU-level bootstrap.
+#' @param psu_name               Character string specifying the name of the primary sampling unit variable in \code{obs_data}.
+#' @param strata_name            Character string specifying the name of the optional strata variable in \code{obs_data}.
 #'
 #' @return                       No value is returned.
 #' @keywords internal
@@ -90,7 +225,8 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
                         time_name, obs_data, parallel, ncores, nsamples,
                         sim_data_b, outcome_name, compevent_name, comprisk,
                         censor, censor_name, covmodels, histvals, ipw_cutoff_quantile,
-                        ipw_cutoff_value, old_convention){
+                        ipw_cutoff_value, old_convention, weight_name,
+                        weighted_models, bootstrap_type, psu_name, strata_name){
 
   if (!is.data.table(obs_data)){
     if (is.data.frame(obs_data)){
@@ -125,6 +261,61 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
       stop("Missing parameter censor_name")
     } else if (!(censor_name %in% obs_colnames)){
       stop(paste('censor_name', censor_name, 'not found in obs_data'))
+    }
+  }
+  if (!is.null(weight_name)){
+    if (!is.character(weight_name) || length(weight_name) != 1 ||
+        is.na(weight_name)){
+      stop("'weight_name' must be a single character string")
+    }
+    if (!(weight_name %in% obs_colnames)){
+      stop(paste('weight_name', weight_name, 'not found in obs_data'))
+    }
+    if (!is.numeric(obs_data[[weight_name]])){
+      stop("'weight_name' must identify a numeric variable")
+    }
+    if (any(is.na(obs_data[[weight_name]])) ||
+        any(!is.finite(obs_data[[weight_name]])) ||
+        any(obs_data[[weight_name]] <= 0)){
+      stop("Sampling weights must be positive, finite, and non-missing")
+    }
+    if (!missing(covnames) && weight_name %in% covnames){
+      stop("'weight_name' should identify a sampling weight, not a time-varying covariate in covnames")
+    }
+  }
+  if (!is.logical(weighted_models) || length(weighted_models) != 1 ||
+      is.na(weighted_models)){
+    stop("'weighted_models' must be TRUE or FALSE")
+  }
+  if (!is.character(bootstrap_type) || length(bootstrap_type) != 1 ||
+      !(bootstrap_type %in% c('ordinary', 'psu'))){
+    stop("'bootstrap_type' must be either 'ordinary' or 'psu'")
+  }
+  if (bootstrap_type == 'psu'){
+    if (is.null(psu_name)){
+      stop("'psu_name' must be supplied when bootstrap_type = 'psu'")
+    }
+    if (!is.character(psu_name) || length(psu_name) != 1 ||
+        is.na(psu_name)){
+      stop("'psu_name' must be a single character string")
+    }
+    if (!(psu_name %in% obs_colnames)){
+      stop(paste('psu_name', psu_name, 'not found in obs_data'))
+    }
+    if (any(is.na(obs_data[[psu_name]]))){
+      stop("PSU values must be non-missing")
+    }
+    if (!is.null(strata_name)){
+      if (!is.character(strata_name) || length(strata_name) != 1 ||
+          is.na(strata_name)){
+        stop("'strata_name' must be a single character string")
+      }
+      if (!(strata_name %in% obs_colnames)){
+        stop(paste('strata_name', strata_name, 'not found in obs_data'))
+      }
+      if (any(is.na(obs_data[[strata_name]]))){
+        stop("Strata values must be non-missing")
+      }
     }
   }
   if (!missing(covnames)){
@@ -189,6 +380,30 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
   if(!(all(obs_data[rows_changing_id + 1][[time_name]] == min_time))){
     stop('obs_data is not sorted with respect to the ID variable and time variable. For each individual time records should begin with 0 (or, optionally -i if using i lags) and increase in increments of 1 in consecutive rows, where no time records are skipped. ')
   }
+  if (!is.null(weight_name)){
+    weight_constant <- tapply(obs_data[[weight_name]], obs_data[[id]], FUN = function(x){
+      length(unique(x)) == 1
+    })
+    if (!all(weight_constant)){
+      stop("Sampling weights must be constant within each individual")
+    }
+  }
+  if (bootstrap_type == 'psu'){
+    psu_constant <- tapply(obs_data[[psu_name]], obs_data[[id]], FUN = function(x){
+      length(unique(x)) == 1
+    })
+    if (!all(psu_constant)){
+      stop("PSU values must be constant within each individual")
+    }
+    if (!is.null(strata_name)){
+      strata_constant <- tapply(obs_data[[strata_name]], obs_data[[id]], FUN = function(x){
+        length(unique(x)) == 1
+      })
+      if (!all(strata_constant)){
+        stop("Strata values must be constant within each individual")
+      }
+    }
+  }
 
   obs_time_points_pos <- max(obs_data[[time_name]])+1
   if (!is.null(time_points)){
@@ -230,7 +445,8 @@ error_catch <- function(id, nsimul, intvars, interventions, int_times, int_descr
     stop("Number of cores must be specified when parallel is set to TRUE")
   }
   if (!is.na(ncores)){
-    if (parallel && ncores > parallel::detectCores()){
+    detected_cores <- parallel::detectCores()
+    if (parallel && !is.na(detected_cores) && ncores > detected_cores){
       stop("Number of cores requested exceeds maximum available number")
     } else if (!parallel){
       stop("Multiple core use requested for non-parallelized function")
@@ -427,7 +643,11 @@ trim_multinom <- function(fit){
 }
 
 add_rmse <- function(fit){
-  return (sqrt(mean((fit$y - stats::fitted(fit))^2)))
+  resid_sq <- (fit$y - stats::fitted(fit))^2
+  if (!is.null(fit$prior.weights) && length(fit$prior.weights) == length(resid_sq)){
+    return(sqrt(weighted_mean_na(resid_sq, fit$prior.weights)))
+  }
+  return (sqrt(mean(resid_sq, na.rm = TRUE)))
 }
 
 add_stderr <- function(fit){
@@ -505,6 +725,16 @@ prep_cluster <- function(ncores, threads , covtypes, bootstrap_option = FALSE){
   clusterAssign(cl, "fit_trunc_normal", fit_trunc_normal)
   clusterAssign(cl, "pred_fun_Y", pred_fun_Y)
   clusterAssign(cl, "pred_fun_D", pred_fun_D)
+  clusterAssign(cl, "get_weight_values", get_weight_values)
+  clusterAssign(cl, "get_hr_weights", get_hr_weights)
+  clusterAssign(cl, "weighted_mean_na", weighted_mean_na)
+  clusterAssign(cl, "weighted_mean_by_time", weighted_mean_by_time)
+  clusterAssign(cl, "weighted_mean_all", weighted_mean_all)
+  clusterAssign(cl, "get_model_weights", get_model_weights)
+  clusterAssign(cl, "call_custom_fit", call_custom_fit)
+  clusterAssign(cl, "fit_weighted_glm", fit_weighted_glm)
+  clusterAssign(cl, "fit_weighted_coxph", fit_weighted_coxph)
+  clusterAssign(cl, "resample_bootstrap_ids", resample_bootstrap_ids)
   clusterAssign(cl, "visit_sum", visit_sum)
   clusterAssign(cl, "natural", natural)
   suppressWarnings(parallel::clusterExport(cl, as.vector(utils::lsf.str())))
@@ -595,7 +825,7 @@ get_vcovs <- function(fits, fitD, time_points, outcome_name, compevent_name,
   return(vcovs)
 }
 
-get_percent_intervened <- function(pools){
+get_percent_intervened <- function(pools, weight_name = NULL){
   percent_intervened <- c(0, rep(NA, times = length(pools)))
   average_percent_intervened <- c(0, rep(NA, times = length(pools)))
   my_any <- function(x){
@@ -609,8 +839,17 @@ get_percent_intervened <- function(pools){
   if (length(pools) > 0){
     for (int_num in 1:length(pools)){
       df <- pools[[int_num]]
-      average_percent_intervened[int_num + 1] <- 100 * mean(df$intervened, na.rm = TRUE)
-      percent_intervened[int_num + 1] <- 100 * mean(tapply(df$intervened, df$id, my_any), na.rm = TRUE)
+      average_percent_intervened[int_num + 1] <-
+        100 * weighted_mean_na(df$intervened, get_weight_values(df, weight_name))
+      if (is.null(weight_name)){
+        percent_intervened[int_num + 1] <-
+          100 * mean(tapply(df$intervened, df$id, my_any), na.rm = TRUE)
+      } else {
+        id_df <- df[, .(intervened = my_any(intervened),
+                        weight = get(weight_name)[1]), by = id]
+        percent_intervened[int_num + 1] <-
+          100 * weighted_mean_na(id_df$intervened, id_df$weight)
+      }
     }
   }
   return(list(percent_intervened = percent_intervened,
